@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GCP Token Bench</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1b26;
+    --border: #2a2b3d;
+    --text: #c0caf5;
+    --text-dim: #565f89;
+    --accent: #7aa2f7;
+    --accent-hover: #89b4fa;
+    --user-bg: #1e2030;
+    --model-bg: #16161e;
+    --pro: #bb9af7;
+    --flash: #9ece6a;
+    --danger: #f7768e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; flex-direction: column;
+  }
+
+  /* ── Setup ── */
+  #setup {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; flex-direction: column; gap: 20px;
+  }
+  #setup.hidden { display: none; }
+  .setup-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 32px; max-width: 500px; width: 90%;
+  }
+  .setup-card h1 { font-size: 24px; color: var(--accent); margin-bottom: 6px; }
+  .setup-card p { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+  .setup-card label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 6px; }
+  .setup-card input, .setup-card select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 14px; border-radius: 8px;
+    font-size: 14px; margin-bottom: 16px;
+  }
+  .setup-card input:focus, .setup-card select:focus { outline: none; border-color: var(--accent); }
+  .file-btn {
+    width: 100%; padding: 12px; background: var(--bg); border: 1px dashed var(--border);
+    color: var(--text-dim); border-radius: 8px; cursor: pointer; font-size: 13px;
+    margin-bottom: 6px; text-align: center;
+  }
+  .file-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #sa-status { font-size: 12px; margin-bottom: 16px; min-height: 18px; }
+  .btn-primary {
+    background: var(--accent); color: var(--bg); border: none;
+    padding: 12px 24px; border-radius: 8px; font-size: 14px;
+    font-weight: 600; cursor: pointer; width: 100%;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+
+  /* ── Header ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px; border-bottom: 1px solid var(--border);
+    background: var(--surface); flex-wrap: wrap; gap: 8px;
+  }
+  .header-left { display: flex; align-items: center; gap: 14px; }
+  header h1 { font-size: 18px; font-weight: 600; color: var(--accent); }
+  .project-label { font-size: 11px; color: var(--text-dim); font-family: monospace; }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .controls label { font-size: 11px; color: var(--text-dim); }
+  .controls select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 8px; border-radius: 6px; font-size: 13px; cursor: pointer;
+  }
+  .controls select:focus { outline: none; border-color: var(--accent); }
+  .slider-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .slider-group input[type="range"] { width: 80px; accent-color: var(--accent); }
+  .header-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  }
+  .header-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .header-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+  .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; }
+  .badge-pro { background: rgba(187,154,247,0.15); color: var(--pro); }
+  .badge-flash { background: rgba(158,206,106,0.15); color: var(--flash); }
+
+  /* ── Chat ── */
+  #chat {
+    flex: 1; overflow-y: auto; padding: 20px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .message {
+    max-width: 800px; width: 100%; margin: 0 auto;
+    padding: 14px 18px; border-radius: 12px;
+    line-height: 1.6; font-size: 14px; white-space: pre-wrap; word-wrap: break-word;
+  }
+  .message.user { background: var(--user-bg); border: 1px solid var(--border); }
+  .message.model { background: var(--model-bg); border: 1px solid transparent; }
+  .message .meta { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .message .content { color: var(--text); }
+  .usage { font-size: 11px; color: var(--text-dim); margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
+
+  /* ── Input ── */
+  #input-area { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface); }
+  #input-wrap { max-width: 800px; margin: 0 auto; display: flex; gap: 10px; }
+  #prompt {
+    flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 12px 16px; border-radius: 10px; font-size: 14px; font-family: inherit;
+    resize: none; min-height: 48px; max-height: 200px;
+  }
+  #prompt:focus { outline: none; border-color: var(--accent); }
+  #send-btn {
+    background: var(--accent); color: var(--bg); border: none; padding: 0 20px;
+    border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  #send-btn:hover { background: var(--accent-hover); }
+  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .cost-bar {
+    max-width: 800px; margin: 8px auto 0; font-size: 11px;
+    color: var(--text-dim); display: flex; justify-content: space-between;
+  }
+  .welcome { max-width: 600px; margin: auto; text-align: center; color: var(--text-dim); line-height: 1.8; }
+  .welcome h2 { color: var(--accent); font-size: 22px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<!-- Setup -->
+<div id="setup">
+  <div class="setup-card">
+    <h1>GCP Token Bench</h1>
+    <p>
+      Connect your GCP project to run prompts against Gemini via Vertex AI.
+      Costs bill against your $300 free trial credit.<br><br>
+      <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" style="color:var(--accent)">Create a service account</a>
+      with the <strong>Vertex AI User</strong> role, then download its JSON key.
+    </p>
+    <label>GCP Project ID</label>
+    <input type="text" id="inp-project" placeholder="my-project-123">
+    <label>Service Account JSON Key</label>
+    <input type="file" id="inp-sa-file" accept=".json" style="display:none">
+    <div class="file-btn" onclick="document.getElementById('inp-sa-file').click()">
+      Click to upload JSON key file
+    </div>
+    <div id="sa-status"></div>
+    <label>Region</label>
+    <select id="inp-region">
+      <option value="us-central1">us-central1 (Iowa)</option>
+      <option value="us-east4">us-east4 (Virginia)</option>
+      <option value="us-west1">us-west1 (Oregon)</option>
+      <option value="europe-west1">europe-west1 (Belgium)</option>
+      <option value="asia-southeast1">asia-southeast1 (Singapore)</option>
+    </select>
+    <button class="btn-primary" onclick="connect()">Start Chatting</button>
+  </div>
+</div>
+
+<!-- App -->
+<header id="app-header" style="display:none">
+  <div class="header-left">
+    <h1>GCP Token Bench</h1>
+    <span class="project-label" id="hdr-project"></span>
+  </div>
+  <div class="controls">
+    <div>
+      <label>Model</label><br>
+      <select id="model-select">
+        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+      </select>
+    </div>
+    <div class="slider-group">
+      <label>Temp: <span id="temp-val">1.0</span></label>
+      <input type="range" id="temperature" min="0" max="2" step="0.1" value="1.0">
+    </div>
+    <div class="slider-group">
+      <label>Max tokens: <span id="max-tok-val">8192</span></label>
+      <input type="range" id="max-tokens" min="256" max="65536" step="256" value="8192">
+    </div>
+    <button class="header-btn" onclick="newChat()">New Chat</button>
+    <button class="header-btn" onclick="changeKey()">Change Key</button>
+  </div>
+</header>
+
+<div id="chat" style="display:none">
+  <div class="welcome">
+    <h2>Ready to go</h2>
+    <p>Pick a model and type your prompt below.<br>
+    Responses stream from Vertex AI using your service account.</p>
+  </div>
+</div>
+
+<div id="input-area" style="display:none">
+  <div id="input-wrap">
+    <textarea id="prompt" rows="1" placeholder="Type your prompt..."></textarea>
+    <button id="send-btn" onclick="send()">Send</button>
+  </div>
+  <div class="cost-bar">
+    <span id="session-stats">Tokens: 0 prompt / 0 completion</span>
+    <span id="session-cost">Estimated cost: $0.0000</span>
+  </div>
+</div>
+
+<script>
+let saKey = null;
+let projectId = null;
+let region = 'us-central1';
+let messages = [];
+let totalPT = 0, totalCT = 0;
+
+const PRICING = {
+  'gemini-2.5-pro':   { input: 1.25, output: 10.00 },
+  'gemini-2.5-flash': { input: 0.15, output: 0.60 },
+};
+
+// ── Setup ──
+document.getElementById('inp-sa-file').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const key = JSON.parse(ev.target.result);
+      saKey = ev.target.result;
+      const st = document.getElementById('sa-status');
+      st.style.color = 'var(--flash)';
+      st.textContent = 'Loaded: ' + (key.client_email || file.name);
+      if (!document.getElementById('inp-project').value && key.project_id)
+        document.getElementById('inp-project').value = key.project_id;
+    } catch {
+      const st = document.getElementById('sa-status');
+      st.style.color = 'var(--danger)';
+      st.textContent = 'Invalid JSON file';
+    }
+  };
+  reader.readAsText(file);
+});
+
+function connect() {
+  projectId = document.getElementById('inp-project').value.trim();
+  region = document.getElementById('inp-region').value;
+  if (!projectId) return alert('Enter your GCP Project ID');
+  if (!saKey) return alert('Upload your service account JSON key');
+  document.getElementById('setup').classList.add('hidden');
+  document.getElementById('app-header').style.display = 'flex';
+  document.getElementById('chat').style.display = 'flex';
+  document.getElementById('input-area').style.display = 'block';
+  document.getElementById('hdr-project').textContent = projectId;
+  document.getElementById('prompt').focus();
+}
+
+function changeKey() {
+  document.getElementById('app-header').style.display = 'none';
+  document.getElementById('chat').style.display = 'none';
+  document.getElementById('input-area').style.display = 'none';
+  document.getElementById('setup').classList.remove('hidden');
+  saKey = null;
+  document.getElementById('sa-status').textContent = '';
+  document.getElementById('inp-sa-file').value = '';
+}
+
+// ── Chat ──
+const chatEl = document.getElementById('chat');
+const promptEl = document.getElementById('prompt');
+const sendBtn = document.getElementById('send-btn');
+const tempSlider = document.getElementById('temperature');
+const maxTokSlider = document.getElementById('max-tokens');
+
+tempSlider.oninput = () => document.getElementById('temp-val').textContent = tempSlider.value;
+maxTokSlider.oninput = () => document.getElementById('max-tok-val').textContent = maxTokSlider.value;
+
+promptEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+promptEl.addEventListener('input', () => {
+  promptEl.style.height = 'auto';
+  promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px';
+});
+
+function getModel() { return document.getElementById('model-select').value; }
+
+function addMsg(role, text, model) {
+  const w = chatEl.querySelector('.welcome'); if (w) w.remove();
+  const div = document.createElement('div');
+  div.className = 'message ' + role;
+  const meta = document.createElement('div'); meta.className = 'meta';
+  if (role === 'user') { meta.textContent = 'You'; }
+  else {
+    const b = document.createElement('span');
+    b.className = 'badge ' + (model.includes('pro') ? 'badge-pro' : 'badge-flash');
+    b.textContent = model.includes('pro') ? 'PRO' : 'FLASH';
+    meta.appendChild(b);
+    meta.appendChild(document.createTextNode(' Gemini'));
+  }
+  const c = document.createElement('div'); c.className = 'content'; c.textContent = text;
+  div.appendChild(meta); div.appendChild(c);
+  chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
+  return c;
+}
+
+function updateStats() {
+  const p = PRICING[getModel()] || PRICING['gemini-2.5-flash'];
+  const cost = (totalPT * p.input + totalCT * p.output) / 1e6;
+  document.getElementById('session-stats').textContent =
+    `Tokens: ${totalPT.toLocaleString()} prompt / ${totalCT.toLocaleString()} completion`;
+  document.getElementById('session-cost').textContent = `Estimated cost: $${cost.toFixed(4)}`;
+}
+
+function newChat() {
+  messages = []; totalPT = 0; totalCT = 0; updateStats();
+  chatEl.innerHTML = '<div class="welcome"><h2>Ready to go</h2><p>Pick a model and type your prompt below.</p></div>';
+}
+
+async function send() {
+  const text = promptEl.value.trim();
+  if (!text || !saKey) return;
+  messages.push({ role: 'user', parts: [{ text }] });
+  addMsg('user', text);
+  promptEl.value = ''; promptEl.style.height = 'auto';
+  sendBtn.disabled = true;
+
+  const model = getModel();
+  const contentEl = addMsg('model', '', model);
+  const msgDiv = contentEl.parentElement;
+
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serviceAccountKey: saKey,
+        projectId, location: region, model, messages,
+        temperature: parseFloat(tempSlider.value),
+        maxTokens: parseInt(maxTokSlider.value),
+      }),
+    });
+
+    if (!resp.ok) {
+      let errMsg = resp.statusText;
+      try { errMsg = (await resp.json()).error || errMsg; } catch {}
+      contentEl.textContent = 'Error: ' + errMsg;
+      messages.pop(); sendBtn.disabled = false; return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '', buffer = '', usageMeta = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const d = line.slice(6).trim();
+        if (!d || d === '[DONE]') continue;
+        try {
+          const chunk = JSON.parse(d);
+          if (chunk.error) {
+            contentEl.textContent = 'Error: ' + chunk.error;
+            messages.pop(); sendBtn.disabled = false; return;
+          }
+          const parts = chunk.candidates?.[0]?.content?.parts;
+          if (parts) for (const p of parts) {
+            if (p.text) { fullText += p.text; contentEl.textContent = fullText; chatEl.scrollTop = chatEl.scrollHeight; }
+          }
+          if (chunk.usageMetadata) usageMeta = chunk.usageMetadata;
+        } catch {}
+      }
+    }
+
+    if (!fullText) {
+      contentEl.textContent = 'Error: Empty response from Vertex AI';
+      messages.pop(); sendBtn.disabled = false; return;
+    }
+
+    messages.push({ role: 'model', parts: [{ text: fullText }] });
+
+    if (usageMeta) {
+      const pt = usageMeta.promptTokenCount || 0;
+      const ct = usageMeta.candidatesTokenCount || 0;
+      const tt = usageMeta.totalTokenCount || 0;
+      totalPT += pt; totalCT += ct;
+      const u = document.createElement('div'); u.className = 'usage';
+      u.textContent = `${pt.toLocaleString()} prompt + ${ct.toLocaleString()} completion = ${tt.toLocaleString()} total tokens`;
+      msgDiv.appendChild(u); updateStats();
+    }
+  } catch (e) {
+    contentEl.textContent = 'Error: ' + e.message;
+    messages.pop();
+  }
+  sendBtn.disabled = false; promptEl.focus();
+}
+</script>
+</body>
+</html>
