@@ -85,6 +85,15 @@ def chats_dir(email):
     return d
 
 
+def safe_id(raw_id):
+    """Sanitize a user-supplied ID to prevent path traversal."""
+    import re
+    clean = re.sub(r'[^a-zA-Z0-9_-]', '', str(raw_id))
+    if not clean:
+        return None
+    return clean
+
+
 def save_user_sa_key(email, key_data):
     d = user_dir(email)
     with open(d / "sa_key.json", "w") as f:
@@ -183,7 +192,7 @@ def list_chats():
 def save_chat():
     data = request.json
     email = data.get("email", "").strip()
-    chat_id = data.get("id") or str(uuid.uuid4())[:8]
+    chat_id = safe_id(data.get("id")) or str(uuid.uuid4())[:8]
     if not email:
         return jsonify({"error": "Not authenticated"}), 401
     d = chats_dir(email)
@@ -206,7 +215,7 @@ def save_chat():
 @app.route("/api/chats/load", methods=["POST"])
 def load_chat():
     data = request.json
-    email, chat_id = data.get("email", "").strip(), data.get("id", "")
+    email, chat_id = data.get("email", "").strip(), safe_id(data.get("id", ""))
     if not email or not chat_id:
         return jsonify({"error": "Missing params"}), 400
     path = chats_dir(email) / f"{chat_id}.json"
@@ -219,7 +228,7 @@ def load_chat():
 @app.route("/api/chats/delete", methods=["POST"])
 def delete_chat():
     data = request.json
-    email, chat_id = data.get("email", "").strip(), data.get("id", "")
+    email, chat_id = data.get("email", "").strip(), safe_id(data.get("id", ""))
     if not email or not chat_id:
         return jsonify({"error": "Missing params"}), 400
     path = chats_dir(email) / f"{chat_id}.json"
@@ -231,7 +240,7 @@ def delete_chat():
 @app.route("/api/chats/rename", methods=["POST"])
 def rename_chat():
     data = request.json
-    email, chat_id, topic = data.get("email", "").strip(), data.get("id", ""), data.get("topic", "")
+    email, chat_id, topic = data.get("email", "").strip(), safe_id(data.get("id", "")), data.get("topic", "")
     if not email or not chat_id:
         return jsonify({"error": "Missing params"}), 400
     path = chats_dir(email) / f"{chat_id}.json"
@@ -459,7 +468,7 @@ def save_media():
     mime_type = data.get("mimeType", "")
     if not email or not media_data:
         return jsonify({"error": "Missing params"}), 400
-    media_id = str(uuid.uuid4())[:12]
+    media_id = str(uuid.uuid4()).replace("-", "")[:12]
     media_dir = user_dir(email) / "media"
     media_dir.mkdir(exist_ok=True)
     with open(media_dir / f"{media_id}.json", "w") as f:
@@ -472,7 +481,7 @@ def load_media():
     """Load saved media by ID."""
     data = request.json
     email = data.get("email", "").strip()
-    media_id = data.get("mediaId", "")
+    media_id = safe_id(data.get("mediaId", ""))
     if not email or not media_id:
         return jsonify({"error": "Missing params"}), 400
     path = user_dir(email) / "media" / f"{media_id}.json"

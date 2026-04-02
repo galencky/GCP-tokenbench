@@ -494,7 +494,7 @@ function showApp(){
   document.getElementById('sb').classList.remove('hidden');document.getElementById('main').classList.remove('hidden');
   document.getElementById('reg-sel').value=region;
   const u=document.getElementById('sb-user');
-  u.innerHTML=(user.picture?`<img src="${user.picture}">`:'')+ `<div><div class="nm">${user.name}</div><div class="pj">${projectId}</div></div>`;
+  u.innerHTML=(user.picture?`<img src="${esc(user.picture)}">`:'')+ `<div><div class="nm">${esc(user.name)}</div><div class="pj">${esc(projectId)}</div></div>`;
   updateMI();loadChatList();document.getElementById('prompt').focus();
 }
 function hideApp(){document.getElementById('sb').classList.add('hidden');document.getElementById('main').classList.add('hidden')}
@@ -638,7 +638,8 @@ async function loadChat(id){
   const ci=document.getElementById('ci');ci.innerHTML='';
   for(let i=0;i<messages.length;i++){
     const m=messages[i];
-    const txt=m.parts.map(p=>p.text||'').join('');
+    const rawTxt=m.parts.map(p=>p.text||'').join('');
+    const txt=m.role!=='user'?rawTxt.replace(/\[image\]/g,'').replace(/\[audio\]/g,'').trim():rawTxt;
     const {body,mc}=addMsg(m.role==='user'?'user':'model',txt,d.model||'gemini-2.5-flash');
     if(m.role!=='user'){
       body.innerHTML=renderMd(txt);
@@ -934,6 +935,10 @@ async function send(){
     const body=document.createElement('div');body.className='mb';
     tMc.replaceChild(body,thk);
 
+    // Create a dedicated text span so textContent updates don't destroy media elements
+    const textSpan=document.createElement('span');
+    body.appendChild(textSpan);
+
     // Show media generation indicator for image/TTS modes
     const isImgMode=document.getElementById('img-tog').checked;
     const isTtsMode=document.getElementById('tts-tog').checked;
@@ -955,10 +960,10 @@ async function send(){
         const d=line.slice(6).trim();if(!d||d==='[DONE]')continue;
         try{
           const chunk=JSON.parse(d);
-          if(chunk.error){const errStr=typeof chunk.error==='object'?JSON.stringify(chunk.error):chunk.error;body.textContent='Error: '+errStr;messages.pop();sendBtn.disabled=false;return}
+          if(chunk.error){const errStr=typeof chunk.error==='object'?JSON.stringify(chunk.error):chunk.error;body.innerHTML='';body.textContent='Error: '+errStr;messages.pop();sendBtn.disabled=false;return}
           const parts=chunk.candidates?.[0]?.content?.parts;
           if(parts)for(const p of parts){
-            if(p.text){full+=p.text;body.textContent=full;ca.scrollTop=ca.scrollHeight}
+            if(p.text){full+=p.text;textSpan.textContent=full;ca.scrollTop=ca.scrollHeight}
             if(p.inlineData){
               const gi=body.querySelector('#gen-indicator');if(gi)gi.remove();
               const d=p.inlineData;
@@ -1025,26 +1030,25 @@ async function send(){
     }
 
     const giFinal=body.querySelector('#gen-indicator');if(giFinal)giFinal.remove();
-    if(!full){body.textContent='Error: Empty response';messages.pop();sendBtn.disabled=false;return}
+    if(!full&&!mediaItems.length&&!pcmChunks.length){body.innerHTML='';body.textContent='Error: Empty response';messages.pop();sendBtn.disabled=false;return}
 
     // Re-render: keep media elements (img, audio, pre from code exec), render text as markdown
-    const mediaEls=body.querySelectorAll('img,audio,pre,div[style*="border-left"]');
+    const mediaEls=Array.from(body.querySelectorAll('.media-wrap,pre,div[style*="border-left"]'));
     const textOnly=full.replace(/\[image\]/g,'').replace(/\[audio\]/g,'').trim();
+    // Clear the textSpan and rebuild with markdown
+    body.innerHTML='';
     if(textOnly){
-      // Build a temp container with markdown, then append media back
       const tmp=document.createElement('div');
       tmp.innerHTML=renderMd(textOnly);
-      // Clear and rebuild
-      body.innerHTML='';
       body.appendChild(tmp);
-      mediaEls.forEach(el=>body.appendChild(el));
     }
+    mediaEls.forEach(el=>body.appendChild(el));
     messages.push({role:'model',parts:[{text:full}]});
 
     const footer=document.createElement('div');footer.className='mf';
     // Copy buttons
     if(textOnly)footer.appendChild(makeCopyBtns(textOnly));
-    if(gsrc.length){const sd=document.createElement('div');sd.className='ms';const uniq=[...new Map(gsrc.map(s=>[s.uri,s])).values()];sd.innerHTML=uniq.map(s=>`<a href="${s.uri}" target="_blank">${s.title||s.domain||'Source'}</a>`).join('');footer.appendChild(sd)}
+    if(gsrc.length){const sd=document.createElement('div');sd.className='ms';const uniq=[...new Map(gsrc.map(s=>[s.uri,s])).values()];sd.innerHTML=uniq.map(s=>`<a href="${esc(s.uri)}" target="_blank" rel="noopener">${esc(s.title||s.domain||'Source')}</a>`).join('');footer.appendChild(sd)}
     if(usage){const pi=usage.promptTokenCount||0,co=usage.candidatesTokenCount||0,tt=usage.totalTokenCount||0;totIn+=pi;totOut+=co;const u=document.createElement('div');u.className='mu';u.textContent=`${pi.toLocaleString()} in + ${co.toLocaleString()} out = ${tt.toLocaleString()} total`;footer.appendChild(u);updateStats()}
     tMc.appendChild(footer);
 
