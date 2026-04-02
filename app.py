@@ -227,9 +227,6 @@ def chat():
         body["tools"] = [{"googleSearch": {}}]
 
     def generate():
-        print(f"[chat] URL: {url}")
-        print(f"[chat] Model: {model_id}, Search: {use_search}")
-
         resp = req_lib.post(
             url,
             headers={
@@ -240,8 +237,6 @@ def chat():
             stream=True,
         )
 
-        print(f"[chat] Status: {resp.status_code}")
-
         if not resp.ok:
             try:
                 error_msg = resp.json().get("error", {}).get("message", resp.text)
@@ -250,21 +245,61 @@ def chat():
             yield f"data: {json.dumps({'error': error_msg})}\n\n"
             return
 
-        # Collect full response then parse as JSON array
-        raw = resp.text
-        print(f"[chat] Response length: {len(raw)}")
+        # Vertex AI streams a JSON array: [{...},\n{...},\n...]
+        # Use incremental JSON parsing with brace counting
+        buffer = ""
+        for raw_chunk in resp.iter_content(chunk_size=4096, decode_unicode=True):
+            buffer += raw_chunk
 
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            print(f"[chat] Failed to parse response: {raw[:500]}")
-            yield f"data: {json.dumps({'error': 'Failed to parse API response'})}\n\n"
-            return
+            while True:
+                # Strip leading array/separator chars
+                buffer = buffer.lstrip(" ,\n\r")
+                if buffer.startswith("["):
+                    buffer = buffer[1:]
+                    continue
+                if not buffer or buffer[0] != "{":
+                    # End of array or non-object data
+                    clean = buffer.strip(" \n\r]")
+                    if not clean:
+                        buffer = ""
+                    break
 
-        # Vertex AI returns a JSON array of chunks
-        chunks = data if isinstance(data, list) else [data]
-        for chunk in chunks:
-            yield f"data: {json.dumps(chunk)}\n\n"
+                # Find complete JSON object by matching braces
+                depth = 0
+                in_str = False
+                esc = False
+                found = -1
+                for i, ch in enumerate(buffer):
+                    if esc:
+                        esc = False
+                        continue
+                    if ch == "\\":
+                        esc = True
+                        continue
+                    if ch == '"' and not esc:
+                        in_str = not in_str
+                        continue
+                    if in_str:
+                        continue
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            found = i
+                            break
+
+                if found == -1:
+                    break  # incomplete object, need more data
+
+                obj_str = buffer[:found + 1]
+                buffer = buffer[found + 1:]
+
+                try:
+                    obj = json.loads(obj_str)
+                    yield f"data: {json.dumps(obj)}\n\n"
+                except json.JSONDecodeError:
+                    continue
 
         yield "data: [DONE]\n\n"
 

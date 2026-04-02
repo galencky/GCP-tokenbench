@@ -8,96 +8,142 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   :root {
-    --bg: #0f1117; --surface: #1a1b26; --border: #2a2b3d;
-    --text: #c0caf5; --dim: #565f89; --accent: #7aa2f7; --accent2: #89b4fa;
-    --user-bg: #1e2030; --model-bg: #16161e;
-    --pro: #bb9af7; --flash: #9ece6a; --danger: #f7768e; --warn: #e0af68;
+    --bg: #1a1a2e; --bg2: #16213e; --surface: #1e2a4a;
+    --border: #2a3a5c; --text: #e0e0e0; --dim: #8892b0;
+    --accent: #64ffda; --accent2: #7c4dff; --accent-dim: rgba(100,255,218,0.1);
+    --user-bg: #1e2a4a; --model-bg: #0f1629;
+    --danger: #ff5252; --warn: #ffd740;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; }
 
-  /* Overlays */
-  .overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 100; flex-direction: column; gap: 24px; }
+  /* ═══ OVERLAYS ═══ */
+  .overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 200; flex-direction: column; gap: 24px; }
   .overlay.hidden { display: none; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; max-width: 500px; width: 90%; }
-  .card h1, .card h2 { color: var(--accent); margin-bottom: 8px; }
-  .card h1 { font-size: 26px; }
-  .card h2 { font-size: 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 36px; max-width: 480px; width: 90%; }
+  .card h1 { font-size: 28px; color: var(--accent); margin-bottom: 8px; }
+  .card h2 { font-size: 20px; color: var(--accent); margin-bottom: 8px; }
   .card p { color: var(--dim); font-size: 13px; margin-bottom: 20px; line-height: 1.6; }
+  .card p a { color: var(--accent); }
   .card label { font-size: 12px; color: var(--dim); display: block; margin-bottom: 6px; }
   .card input, .card select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 14px; }
   .card input:focus, .card select:focus { outline: none; border-color: var(--accent); }
-  .file-drop { width: 100%; padding: 16px; background: var(--bg); border: 2px dashed var(--border); color: var(--dim); border-radius: 8px; cursor: pointer; font-size: 13px; margin-bottom: 8px; text-align: center; transition: border-color 0.2s; }
-  .file-drop:hover { border-color: var(--accent); color: var(--accent); }
-  .file-drop.active { border-color: var(--flash); color: var(--flash); }
+  .file-drop { width: 100%; padding: 20px; background: var(--bg); border: 2px dashed var(--border); color: var(--dim); border-radius: 10px; cursor: pointer; font-size: 13px; margin-bottom: 8px; text-align: center; transition: all 0.2s; }
+  .file-drop:hover, .file-drop.active { border-color: var(--accent); color: var(--accent); }
   #sa-status { font-size: 12px; min-height: 18px; margin-bottom: 14px; }
-  .btn { border: none; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; }
+  .btn { border: none; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; }
   .btn-primary { background: var(--accent); color: var(--bg); }
-  .btn-primary:hover { background: var(--accent2); }
-  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  /* Login bypass */
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
   .dev-bypass { font-size: 12px; color: var(--dim); cursor: pointer; text-decoration: underline; }
   .dev-bypass:hover { color: var(--accent); }
 
-  /* Header */
-  header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface); flex-wrap: wrap; gap: 6px; }
-  .hdr-left { display: flex; align-items: center; gap: 12px; }
-  .hdr-left h1 { font-size: 16px; font-weight: 600; color: var(--accent); }
-  .hdr-chip { display: flex; align-items: center; gap: 6px; background: var(--bg); padding: 3px 10px 3px 3px; border-radius: 16px; border: 1px solid var(--border); }
-  .hdr-chip img { width: 22px; height: 22px; border-radius: 50%; }
-  .hdr-chip span { font-size: 11px; color: var(--dim); }
-  .hdr-project { font-size: 11px; color: var(--dim); font-family: monospace; }
-  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .controls label { font-size: 10px; color: var(--dim); }
-  .controls select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 6px; border-radius: 6px; font-size: 12px; cursor: pointer; width: auto; margin-bottom: 0; }
-  .slider-grp { display: flex; flex-direction: column; align-items: center; gap: 1px; }
-  .slider-grp input[type="range"] { width: 70px; accent-color: var(--accent); }
-  .hdr-btn { background: transparent; border: 1px solid var(--border); color: var(--dim); padding: 4px 8px; border-radius: 6px; font-size: 11px; cursor: pointer; }
-  .hdr-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .hdr-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+  /* ═══ SIDEBAR ═══ */
+  #sidebar {
+    width: 300px; min-width: 300px; background: var(--bg2); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 16px; gap: 16px; overflow-y: auto;
+  }
+  #sidebar.hidden { display: none; }
+  .sb-title { font-size: 18px; font-weight: 700; color: var(--accent); display: flex; align-items: center; justify-content: space-between; }
+  .sb-section { display: flex; flex-direction: column; gap: 8px; }
+  .sb-label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .sb-select { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+  .sb-select:focus { outline: none; border-color: var(--accent); }
+  .sb-model-info { font-size: 11px; color: var(--dim); padding: 6px 0; }
+  .sb-model-info .price { color: var(--warn); }
+  .sb-textarea {
+    width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 10px; border-radius: 8px; font-size: 13px; font-family: inherit; resize: vertical;
+    min-height: 80px;
+  }
+  .sb-textarea:focus { outline: none; border-color: var(--accent); }
+  .sb-textarea::placeholder { color: var(--dim); }
+  .sb-slider { display: flex; justify-content: space-between; align-items: center; }
+  .sb-slider label { font-size: 12px; color: var(--dim); }
+  .sb-slider span { font-size: 12px; color: var(--text); min-width: 40px; text-align: right; }
+  .sb-slider input[type="range"] { flex: 1; margin: 0 8px; accent-color: var(--accent); }
+  .sb-toggle { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
+  .sb-toggle input[type="checkbox"] { accent-color: var(--accent); }
+  .sb-toggle label { font-size: 13px; color: var(--text); cursor: pointer; }
+  .sb-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+  .sb-btn { background: var(--surface); border: 1px solid var(--border); color: var(--dim); padding: 8px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; width: 100%; text-align: center; }
+  .sb-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .sb-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+  .sb-user { display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--surface); border-radius: 8px; margin-top: auto; }
+  .sb-user img { width: 28px; height: 28px; border-radius: 50%; }
+  .sb-user .info { flex: 1; overflow: hidden; }
+  .sb-user .name { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sb-user .proj { font-size: 10px; color: var(--dim); font-family: monospace; }
 
-  /* Model info */
-  .model-info { font-size: 10px; color: var(--dim); padding: 4px 0; }
-  .model-info .price { color: var(--warn); }
+  /* ═══ MAIN ═══ */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #main.hidden { display: none; }
 
-  /* Chat */
-  #chat-area { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 800px; width: 100%; margin: 0 auto; padding: 12px 16px; border-radius: 10px; line-height: 1.6; font-size: 14px; word-wrap: break-word; }
-  .msg.user { background: var(--user-bg); border: 1px solid var(--border); }
-  .msg.model { background: var(--model-bg); }
-  .msg .meta { font-size: 11px; color: var(--dim); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
-  .msg .body { color: var(--text); }
-  .msg .body p { margin: 0.4em 0; }
-  .msg .body pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 0.5em 0; }
-  .msg .body code { background: var(--bg); padding: 1px 4px; border-radius: 3px; font-size: 13px; }
-  .msg .body pre code { background: none; padding: 0; }
-  .msg .body ul, .msg .body ol { margin: 0.4em 0 0.4em 1.5em; }
-  .msg .body h1, .msg .body h2, .msg .body h3 { margin: 0.6em 0 0.3em; color: var(--accent); }
-  .msg .body blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: var(--dim); margin: 0.4em 0; }
-  .msg .body table { border-collapse: collapse; margin: 0.5em 0; }
-  .msg .body th, .msg .body td { border: 1px solid var(--border); padding: 4px 8px; font-size: 13px; }
-  .msg .body a { color: var(--accent); }
-  .msg.user .body { white-space: pre-wrap; }
-  .sources { font-size: 11px; color: var(--dim); margin-top: 6px; }
-  .sources a { color: var(--accent); margin-right: 10px; }
-  .msg .usage { font-size: 10px; color: var(--dim); margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border); }
-  .badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; text-transform: uppercase; }
-  .badge-3 { background: rgba(224,175,104,0.15); color: var(--warn); }
-  .badge-pro { background: rgba(187,154,247,0.15); color: var(--pro); }
-  .badge-flash { background: rgba(158,206,106,0.15); color: var(--flash); }
-  .welcome { max-width: 600px; margin: auto; text-align: center; color: var(--dim); line-height: 1.8; }
-  .welcome h2 { color: var(--accent); font-size: 20px; margin-bottom: 8px; }
+  /* Chat area */
+  #chat-area { flex: 1; overflow-y: auto; padding: 24px 0; }
+  .chat-inner { max-width: 800px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 20px; }
 
-  /* Input */
-  #input-bar { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface); }
-  #input-wrap { max-width: 800px; margin: 0 auto; display: flex; gap: 8px; }
-  #prompt { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 10px; font-size: 14px; font-family: inherit; resize: none; min-height: 44px; max-height: 200px; }
+  .msg { display: flex; gap: 12px; }
+  .msg-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+  .msg.user .msg-avatar { background: var(--accent2); color: white; }
+  .msg.model .msg-avatar { background: var(--accent-dim); color: var(--accent); }
+  .msg-content { flex: 1; min-width: 0; }
+  .msg-role { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  .msg.user .msg-role { color: var(--accent2); }
+  .msg.model .msg-role { color: var(--accent); }
+  .msg-body { font-size: 14px; line-height: 1.7; color: var(--text); }
+  .msg.user .msg-body { white-space: pre-wrap; }
+  .msg-body p { margin: 0.3em 0; }
+  .msg-body pre { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 0.5em 0; font-size: 13px; }
+  .msg-body code { background: var(--bg2); padding: 2px 5px; border-radius: 4px; font-size: 13px; }
+  .msg-body pre code { background: none; padding: 0; }
+  .msg-body ul, .msg-body ol { margin: 0.3em 0 0.3em 1.2em; }
+  .msg-body h1, .msg-body h2, .msg-body h3, .msg-body h4 { margin: 0.6em 0 0.2em; color: var(--accent); font-size: 16px; }
+  .msg-body h1 { font-size: 20px; } .msg-body h2 { font-size: 18px; }
+  .msg-body blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--dim); margin: 0.4em 0; }
+  .msg-body table { border-collapse: collapse; margin: 0.5em 0; width: 100%; }
+  .msg-body th, .msg-body td { border: 1px solid var(--border); padding: 6px 10px; font-size: 13px; text-align: left; }
+  .msg-body th { background: var(--surface); }
+  .msg-body a { color: var(--accent); }
+  .msg-body strong { color: #fff; }
+  .msg-footer { display: flex; gap: 16px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .msg-usage { font-size: 11px; color: var(--dim); }
+  .msg-sources { font-size: 11px; }
+  .msg-sources a { color: var(--accent); margin-right: 8px; text-decoration: none; }
+  .msg-sources a:hover { text-decoration: underline; }
+
+  /* Thinking indicator */
+  .thinking { display: flex; align-items: center; gap: 8px; padding: 8px 0; color: var(--dim); font-size: 13px; }
+  .thinking-dots { display: flex; gap: 4px; }
+  .thinking-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s infinite; }
+  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes pulse { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+
+  /* Welcome */
+  .welcome { text-align: center; color: var(--dim); margin: auto; padding: 40px 20px; }
+  .welcome h2 { color: var(--accent); font-size: 24px; margin-bottom: 12px; }
+  .welcome p { font-size: 14px; line-height: 1.8; }
+
+  /* ═══ INPUT BAR ═══ */
+  #input-bar { padding: 16px 24px; border-top: 1px solid var(--border); background: var(--bg2); }
+  .input-inner { max-width: 800px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+  #prompt {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 12px 16px; border-radius: 12px; font-size: 14px; font-family: inherit;
+    resize: none; min-height: 48px; max-height: 200px; line-height: 1.5;
+  }
   #prompt:focus { outline: none; border-color: var(--accent); }
-  #send-btn { background: var(--accent); color: var(--bg); border: none; padding: 0 18px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
-  #send-btn:hover { background: var(--accent2); }
-  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .stats-bar { max-width: 800px; margin: 6px auto 0; font-size: 10px; color: var(--dim); display: flex; justify-content: space-between; }
+  #prompt::placeholder { color: var(--dim); }
+  #send-btn {
+    width: 44px; height: 44px; border-radius: 12px; border: none;
+    background: var(--accent); color: var(--bg); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  #send-btn:hover { opacity: 0.85; }
+  #send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  #send-btn svg { width: 20px; height: 20px; }
+  .stats-bar { max-width: 800px; margin: 6px auto 0; font-size: 11px; color: var(--dim); display: flex; justify-content: space-between; }
 </style>
 </head>
 <body>
@@ -106,9 +152,9 @@
 <div id="login-screen" class="overlay">
   <div class="card" style="text-align:center;">
     <h1>GCP Token Bench</h1>
-    <p>Run prompts against Gemini models using your GCP $300 free credit.<br>Sign in with Google to get started.</p>
-    <div id="g-signin-btn" style="display:inline-block;"></div>
-    <br><br>
+    <p>Run prompts against Gemini models using your GCP $300 free credit.</p>
+    <div id="g-signin-btn" style="display:inline-block;margin-bottom:16px;"></div>
+    <br>
     <span class="dev-bypass" id="dev-bypass">Continue without sign-in (local dev)</span>
   </div>
 </div>
@@ -116,17 +162,13 @@
 <!-- ═══ KEY SETUP ═══ -->
 <div id="key-screen" class="overlay hidden">
   <div class="card">
-    <h2>Connect your GCP Project</h2>
-    <p>
-      Upload your service account JSON key. It will be saved server-side so you don't need to upload it again.<br>
-      <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" style="color:var(--accent)">Create a service account</a> with the <b>Vertex AI User</b> role.
-    </p>
+    <h2>Connect GCP Project</h2>
+    <p>Upload your service account JSON key. It's saved server-side so you only do this once.<br>
+    <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank">Create a service account</a> with the <b>Vertex AI User</b> role.</p>
     <input type="file" id="sa-file" accept=".json" style="display:none">
-    <div class="file-drop" id="file-drop" onclick="document.getElementById('sa-file').click()">
-      Click or drag to upload JSON key file
-    </div>
+    <div class="file-drop" id="file-drop" onclick="document.getElementById('sa-file').click()">Click or drag JSON key file here</div>
     <div id="sa-status"></div>
-    <label>Region</label>
+    <label>Region (for 2.5 models)</label>
     <select id="setup-region">
       <option value="us-central1">us-central1 (Iowa)</option>
       <option value="us-east4">us-east4 (Virginia)</option>
@@ -134,30 +176,60 @@
       <option value="europe-west1">europe-west1 (Belgium)</option>
       <option value="asia-southeast1">asia-southeast1 (Singapore)</option>
     </select>
-    <button class="btn btn-primary" id="save-key-btn" onclick="saveKey()" disabled>Connect & Start</button>
+    <button class="btn btn-primary" id="save-key-btn" onclick="saveKey()" disabled>Connect</button>
   </div>
 </div>
 
-<!-- ═══ MAIN APP ═══ -->
-<header id="app-header" style="display:none">
-  <div class="hdr-left">
-    <h1>Token Bench</h1>
-    <div class="hdr-chip" id="hdr-user"></div>
-    <span class="hdr-project" id="hdr-project"></span>
+<!-- ═══ SIDEBAR ═══ -->
+<div id="sidebar" class="hidden">
+  <div class="sb-title">
+    Token Bench
+    <button class="sb-btn" style="width:auto;padding:4px 10px;" onclick="newChat()">+ New</button>
   </div>
-  <div class="controls">
-    <div>
-      <label>Model</label><br>
-      <select id="model-select" onchange="updateModelInfo()">
-        {% for id, m in models.items() %}
+
+  <div class="sb-section">
+    <div class="sb-label">Model</div>
+    <select class="sb-select" id="model-select" onchange="updateModelInfo()">
+      <optgroup label="Gemini 3.x (Preview)">
+        {% for id, m in models.items() if m.get('global') %}
         <option value="{{ id }}">{{ m.name }}</option>
         {% endfor %}
-      </select>
-      <div class="model-info" id="model-info"></div>
+      </optgroup>
+      <optgroup label="Gemini 2.5 (Stable)">
+        {% for id, m in models.items() if not m.get('global') %}
+        <option value="{{ id }}">{{ m.name }}</option>
+        {% endfor %}
+      </optgroup>
+    </select>
+    <div class="sb-model-info" id="model-info"></div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">System Instructions</div>
+    <textarea class="sb-textarea" id="system-prompt" placeholder="You are a helpful assistant..."></textarea>
+  </div>
+
+  <hr class="sb-divider">
+
+  <div class="sb-section">
+    <div class="sb-label">Settings</div>
+    <div class="sb-slider">
+      <label>Temperature</label>
+      <input type="range" id="temp" min="0" max="2" step="0.1" value="1.0">
+      <span id="tv">1.0</span>
     </div>
-    <div>
-      <label>Region</label><br>
-      <select id="region-select">
+    <div class="sb-slider">
+      <label>Max output</label>
+      <input type="range" id="maxtok" min="256" max="65536" step="256" value="8192">
+      <span id="mv">8192</span>
+    </div>
+    <div class="sb-toggle">
+      <input type="checkbox" id="search-toggle">
+      <label for="search-toggle">Google Search grounding</label>
+    </div>
+    <div class="sb-slider">
+      <label>Region</label>
+      <select class="sb-select" id="region-select" style="flex:1;margin-left:8px;">
         <option value="us-central1">us-central1</option>
         <option value="us-east4">us-east4</option>
         <option value="us-west1">us-west1</option>
@@ -165,309 +237,221 @@
         <option value="asia-southeast1">asia-southeast1</option>
       </select>
     </div>
-    <div class="slider-grp">
-      <label>Temp: <span id="tv">1.0</span></label>
-      <input type="range" id="temp" min="0" max="2" step="0.1" value="1.0">
-    </div>
-    <div class="slider-grp">
-      <label>Max: <span id="mv">8192</span></label>
-      <input type="range" id="maxtok" min="256" max="65536" step="256" value="8192">
-    </div>
-    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-      <input type="checkbox" id="search-toggle" style="accent-color:var(--accent);">
-      <span style="font-size:11px;color:var(--dim);">Google Search</span>
-    </label>
-    <button class="hdr-btn" onclick="newChat()">New Chat</button>
-    <button class="hdr-btn" onclick="reuploadKey()">Change Key</button>
-    <button class="hdr-btn danger" onclick="logout()">Sign Out</button>
   </div>
-</header>
 
-<div id="chat-area" style="display:none">
-  <div class="welcome"><h2>Ready</h2><p>Pick a model and send a prompt.</p></div>
+  <hr class="sb-divider">
+
+  <div class="sb-section" style="gap:6px;">
+    <button class="sb-btn" onclick="reuploadKey()">Change Service Account</button>
+    <button class="sb-btn danger" onclick="logout()">Sign Out</button>
+  </div>
+
+  <div class="sb-user" id="sb-user"></div>
 </div>
 
-<div id="input-bar" style="display:none">
-  <div id="input-wrap">
-    <textarea id="prompt" rows="1" placeholder="Type your prompt..."></textarea>
-    <button id="send-btn" onclick="send()">Send</button>
+<!-- ═══ MAIN ═══ -->
+<div id="main" class="hidden">
+  <div id="chat-area">
+    <div class="chat-inner" id="chat-inner">
+      <div class="welcome">
+        <h2>Start a conversation</h2>
+        <p>Select a model from the sidebar and send a prompt.<br>Toggle Google Search to ground responses in real-time web data.</p>
+      </div>
+    </div>
   </div>
-  <div class="stats-bar">
-    <span id="stats">Tokens: 0 in / 0 out</span>
-    <span id="cost">$0.0000</span>
+  <div id="input-bar">
+    <div class="input-inner">
+      <textarea id="prompt" rows="1" placeholder="Enter a prompt here..."></textarea>
+      <button id="send-btn" onclick="send()">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+    <div class="stats-bar">
+      <span id="stats">0 tokens</span>
+      <span id="cost">$0.0000</span>
+    </div>
   </div>
 </div>
 
 <script>
-// ── State ──
-let user = null;   // { name, email, picture }
-let projectId = '';
-let region = 'us-central1';
-let saKeyRaw = null; // raw JSON string for initial upload
-let messages = [];
-let totIn = 0, totOut = 0;
-
 const MODELS = {{ models | tojson }};
+let user = null, projectId = '', region = 'us-central1', saKeyRaw = null;
+let messages = [], totIn = 0, totOut = 0;
 
-// ── Google Sign-In ──
+// ── Auth ──
 function onGsiLoad() {
-  if (!window.google?.accounts?.id) {
-    setTimeout(onGsiLoad, 200);
-    return;
-  }
-  // Try to init - will fail silently if no client ID configured
+  if (!window.google?.accounts?.id) { setTimeout(onGsiLoad, 200); return; }
   try {
-    google.accounts.id.initialize({
-      client_id: '{{ config.get("GOOGLE_CLIENT_ID", "") }}',
-      callback: onGoogleLogin,
-    });
-    google.accounts.id.renderButton(document.getElementById('g-signin-btn'), {
-      type: 'standard', theme: 'filled_black', size: 'large', text: 'signin_with',
-    });
-  } catch (e) {
-    // No client ID - show dev bypass only
-  }
+    google.accounts.id.initialize({ client_id: '{{ config.get("GOOGLE_CLIENT_ID", "") }}', callback: onGoogleLogin });
+    google.accounts.id.renderButton(document.getElementById('g-signin-btn'), { type:'standard', theme:'filled_black', size:'large', text:'signin_with' });
+  } catch(e) {}
 }
 window.addEventListener('load', onGsiLoad);
+function onGoogleLogin(r) { const p = parseJwt(r.credential); user = { name:p.name, email:p.email, picture:p.picture }; localStorage.setItem('tb-user', JSON.stringify(user)); afterLogin(); }
+function parseJwt(t) { const b=t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'); return JSON.parse(decodeURIComponent(atob(b).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''))); }
+document.getElementById('dev-bypass').onclick = () => { user={name:'Local Dev',email:'dev@localhost',picture:''}; localStorage.setItem('tb-user',JSON.stringify(user)); afterLogin(); };
 
-function onGoogleLogin(resp) {
-  const p = parseJwt(resp.credential);
-  user = { name: p.name, email: p.email, picture: p.picture };
-  localStorage.setItem('tb-user', JSON.stringify(user));
-  afterLogin();
-}
-
-function parseJwt(t) {
-  const b = t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
-  return JSON.parse(decodeURIComponent(atob(b).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join('')));
-}
-
-document.getElementById('dev-bypass').onclick = () => {
-  user = { name: 'Local Dev', email: 'dev@localhost', picture: '' };
-  localStorage.setItem('tb-user', JSON.stringify(user));
-  afterLogin();
-};
-
-// ── Auth flow ──
 async function afterLogin() {
   document.getElementById('login-screen').classList.add('hidden');
-
-  // Check if user already has a key saved
-  const resp = await fetch('/api/check-key', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: user.email }),
-  });
-  const data = await resp.json();
-
-  if (data.has_key) {
-    projectId = data.project_id;
-    showApp();
-  } else {
-    showKeyScreen();
-  }
+  const r = await fetch('/api/check-key', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:user.email}) });
+  const d = await r.json();
+  if (d.has_key) { projectId=d.project_id; showApp(); } else { showKeyScreen(); }
 }
 
-function showKeyScreen() {
-  document.getElementById('key-screen').classList.remove('hidden');
-}
+function showKeyScreen() { document.getElementById('key-screen').classList.remove('hidden'); }
 
-// File upload
 const saFileInput = document.getElementById('sa-file');
 const fileDrop = document.getElementById('file-drop');
-
 saFileInput.addEventListener('change', e => handleFile(e.target.files[0]));
 fileDrop.addEventListener('dragover', e => { e.preventDefault(); fileDrop.classList.add('active'); });
 fileDrop.addEventListener('dragleave', () => fileDrop.classList.remove('active'));
 fileDrop.addEventListener('drop', e => { e.preventDefault(); fileDrop.classList.remove('active'); handleFile(e.dataTransfer.files[0]); });
-
-function handleFile(file) {
-  if (!file) return;
+function handleFile(f) {
+  if (!f) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
-      const key = JSON.parse(ev.target.result);
-      saKeyRaw = ev.target.result;
-      const st = document.getElementById('sa-status');
-      st.style.color = 'var(--flash)';
-      st.textContent = 'Loaded: ' + (key.client_email || file.name);
-      document.getElementById('save-key-btn').disabled = false;
-      fileDrop.textContent = file.name;
-      fileDrop.classList.add('active');
-    } catch {
-      document.getElementById('sa-status').style.color = 'var(--danger)';
-      document.getElementById('sa-status').textContent = 'Invalid JSON file';
-    }
+      const k = JSON.parse(ev.target.result); saKeyRaw = ev.target.result;
+      document.getElementById('sa-status').style.color='var(--accent)';
+      document.getElementById('sa-status').textContent='Loaded: '+(k.client_email||f.name);
+      document.getElementById('save-key-btn').disabled=false;
+      fileDrop.textContent=f.name; fileDrop.classList.add('active');
+    } catch { document.getElementById('sa-status').style.color='var(--danger)'; document.getElementById('sa-status').textContent='Invalid JSON'; }
   };
-  reader.readAsText(file);
+  reader.readAsText(f);
 }
-
 async function saveKey() {
   if (!saKeyRaw) return;
-  const btn = document.getElementById('save-key-btn');
-  btn.disabled = true;
-  btn.textContent = 'Validating...';
-
-  region = document.getElementById('setup-region').value;
-
-  const resp = await fetch('/api/save-key', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: user.email, serviceAccountKey: saKeyRaw }),
-  });
-  const data = await resp.json();
-
-  if (data.error) {
-    document.getElementById('sa-status').style.color = 'var(--danger)';
-    document.getElementById('sa-status').textContent = 'Error: ' + data.error;
-    btn.disabled = false;
-    btn.textContent = 'Connect & Start';
-    return;
-  }
-
-  projectId = data.project_id;
-  saKeyRaw = null; // clear from memory
-  document.getElementById('key-screen').classList.add('hidden');
-  showApp();
+  const btn=document.getElementById('save-key-btn'); btn.disabled=true; btn.textContent='Validating...';
+  region=document.getElementById('setup-region').value;
+  const r=await fetch('/api/save-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email,serviceAccountKey:saKeyRaw})});
+  const d=await r.json();
+  if (d.error) { document.getElementById('sa-status').style.color='var(--danger)'; document.getElementById('sa-status').textContent=d.error; btn.disabled=false; btn.textContent='Connect'; return; }
+  projectId=d.project_id; saKeyRaw=null;
+  document.getElementById('key-screen').classList.add('hidden'); showApp();
 }
-
-function reuploadKey() {
-  hideApp();
-  saKeyRaw = null;
-  document.getElementById('sa-status').textContent = '';
-  document.getElementById('sa-file').value = '';
-  document.getElementById('file-drop').textContent = 'Click or drag to upload JSON key file';
-  document.getElementById('file-drop').classList.remove('active');
-  document.getElementById('save-key-btn').disabled = true;
-  document.getElementById('save-key-btn').textContent = 'Connect & Start';
-  showKeyScreen();
-}
-
-function logout() {
-  localStorage.removeItem('tb-user');
-  user = null;
-  location.reload();
-}
+function reuploadKey() { hideApp(); saKeyRaw=null; document.getElementById('sa-status').textContent=''; document.getElementById('sa-file').value=''; fileDrop.textContent='Click or drag JSON key file here'; fileDrop.classList.remove('active'); document.getElementById('save-key-btn').disabled=true; document.getElementById('save-key-btn').textContent='Connect'; showKeyScreen(); }
+function logout() { localStorage.removeItem('tb-user'); location.reload(); }
 
 // ── App ──
 function showApp() {
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('key-screen').classList.add('hidden');
-  document.getElementById('app-header').style.display = 'flex';
-  document.getElementById('chat-area').style.display = 'flex';
-  document.getElementById('input-bar').style.display = 'block';
-
-  const chip = document.getElementById('hdr-user');
-  chip.innerHTML = user.picture
-    ? `<img src="${user.picture}"><span>${user.name}</span>`
-    : `<span>${user.name}</span>`;
-  document.getElementById('hdr-project').textContent = projectId;
+  document.getElementById('sidebar').classList.remove('hidden');
+  document.getElementById('main').classList.remove('hidden');
   document.getElementById('region-select').value = region;
+  // User info
+  const u = document.getElementById('sb-user');
+  u.innerHTML = (user.picture ? `<img src="${user.picture}">` : '') +
+    `<div class="info"><div class="name">${user.name}</div><div class="proj">${projectId}</div></div>`;
   updateModelInfo();
   document.getElementById('prompt').focus();
 }
-
 function hideApp() {
-  document.getElementById('app-header').style.display = 'none';
-  document.getElementById('chat-area').style.display = 'none';
-  document.getElementById('input-bar').style.display = 'none';
+  document.getElementById('sidebar').classList.add('hidden');
+  document.getElementById('main').classList.add('hidden');
 }
-
-// Check saved session on load
-window.addEventListener('load', () => {
-  const saved = localStorage.getItem('tb-user');
-  if (saved) { user = JSON.parse(saved); afterLogin(); }
-});
 
 // ── Model info ──
 function updateModelInfo() {
   const m = MODELS[document.getElementById('model-select').value];
   if (!m) return;
   document.getElementById('model-info').innerHTML =
-    `<span class="price">$${m.input_price}/M in · $${m.output_price}/M out</span> · ${(m.context/1e6).toFixed(1)}M ctx`;
+    `<span class="price">$${m.input_price}/M in &middot; $${m.output_price}/M out</span> &middot; ${(m.context/1e6).toFixed(1)}M context &middot; ${m.category}`;
 }
 
+// ── Sliders ──
+document.getElementById('temp').oninput = function() { document.getElementById('tv').textContent = this.value; };
+document.getElementById('maxtok').oninput = function() { document.getElementById('mv').textContent = this.value; };
+
 // ── Chat ──
-const chatEl = document.getElementById('chat-area');
+const chatInner = document.getElementById('chat-inner');
+const chatArea = document.getElementById('chat-area');
 const promptEl = document.getElementById('prompt');
 const sendBtn = document.getElementById('send-btn');
-const tempS = document.getElementById('temp');
-const maxS = document.getElementById('maxtok');
 
-tempS.oninput = () => document.getElementById('tv').textContent = tempS.value;
-maxS.oninput = () => document.getElementById('mv').textContent = maxS.value;
 promptEl.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 promptEl.addEventListener('input', () => { promptEl.style.height='auto'; promptEl.style.height=Math.min(promptEl.scrollHeight,200)+'px'; });
 
 function getModel() { return document.getElementById('model-select').value; }
 
-function badgeFor(modelId) {
-  if (modelId.includes('3.')) return ['3.x', 'badge-3'];
-  if (modelId.includes('pro')) return ['PRO', 'badge-pro'];
-  return ['FLASH', 'badge-flash'];
-}
-
 function addMsg(role, text, modelId) {
-  const w = chatEl.querySelector('.welcome'); if (w) w.remove();
-  const div = document.createElement('div');
-  div.className = 'msg ' + role;
-  const meta = document.createElement('div'); meta.className = 'meta';
-  if (role === 'user') { meta.textContent = 'You'; }
-  else {
-    const [label, cls] = badgeFor(modelId);
-    const b = document.createElement('span'); b.className = 'badge ' + cls; b.textContent = label;
-    meta.appendChild(b);
-    const name = MODELS[modelId]?.name || modelId;
-    meta.appendChild(document.createTextNode(' ' + name));
-  }
-  const body = document.createElement('div'); body.className = 'body';
+  const w = chatInner.querySelector('.welcome'); if (w) w.remove();
+  const div = document.createElement('div'); div.className = 'msg ' + role;
+  const avatar = document.createElement('div'); avatar.className = 'msg-avatar';
+  avatar.textContent = role === 'user' ? 'U' : 'G';
+  const content = document.createElement('div'); content.className = 'msg-content';
+  const roleEl = document.createElement('div'); roleEl.className = 'msg-role';
+  roleEl.textContent = role === 'user' ? 'You' : (MODELS[modelId]?.name || 'Gemini');
+  const body = document.createElement('div'); body.className = 'msg-body';
   if (role === 'user') body.textContent = text;
   else body.innerHTML = renderMd(text);
-  div.appendChild(meta); div.appendChild(body);
-  chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
-  return body;
+  content.appendChild(roleEl); content.appendChild(body);
+  div.appendChild(avatar); div.appendChild(content);
+  chatInner.appendChild(div); chatArea.scrollTop = chatArea.scrollHeight;
+  return { body, content, div };
 }
 
-function renderMd(text) {
-  if (!text) return '';
-  try { return marked.parse(text); } catch { return text; }
+function renderMd(t) { if (!t) return ''; try { return marked.parse(t); } catch { return t; } }
+
+function showThinking(modelId) {
+  const w = chatInner.querySelector('.welcome'); if (w) w.remove();
+  const div = document.createElement('div'); div.className = 'msg model'; div.id = 'thinking-msg';
+  const avatar = document.createElement('div'); avatar.className = 'msg-avatar'; avatar.textContent = 'G';
+  const content = document.createElement('div'); content.className = 'msg-content';
+  const roleEl = document.createElement('div'); roleEl.className = 'msg-role';
+  roleEl.textContent = MODELS[modelId]?.name || 'Gemini';
+  const thinking = document.createElement('div'); thinking.className = 'thinking';
+  thinking.innerHTML = '<div class="thinking-dots"><span></span><span></span><span></span></div><span>Thinking...</span>';
+  content.appendChild(roleEl); content.appendChild(thinking);
+  div.appendChild(avatar); div.appendChild(content);
+  chatInner.appendChild(div); chatArea.scrollTop = chatArea.scrollHeight;
+  return { div, content };
 }
 
 function updateStats() {
   const m = MODELS[getModel()];
   const c = m ? (totIn * m.input_price + totOut * m.output_price) / 1e6 : 0;
-  document.getElementById('stats').textContent = `Tokens: ${totIn.toLocaleString()} in / ${totOut.toLocaleString()} out`;
-  document.getElementById('cost').textContent = `$${c.toFixed(4)}`;
+  document.getElementById('stats').textContent = `${(totIn+totOut).toLocaleString()} tokens (${totIn.toLocaleString()} in / ${totOut.toLocaleString()} out)`;
+  document.getElementById('cost').textContent = `Est. $${c.toFixed(4)}`;
 }
 
 function newChat() {
   messages = []; totIn = 0; totOut = 0; updateStats();
-  chatEl.innerHTML = '<div class="welcome"><h2>Ready</h2><p>Pick a model and send a prompt.</p></div>';
+  chatInner.innerHTML = '<div class="welcome"><h2>Start a conversation</h2><p>Select a model and send a prompt.</p></div>';
 }
 
 async function send() {
   const text = promptEl.value.trim();
   if (!text || !user) return;
-  messages.push({ role: 'user', parts: [{ text }] });
+
+  // Add system instruction if set
+  const sysPrompt = document.getElementById('system-prompt').value.trim();
+  const userMsg = { role: 'user', parts: [{ text }] };
+
+  // Build messages with system instruction
+  if (messages.length === 0 && sysPrompt) {
+    messages.push({ role: 'user', parts: [{ text: sysPrompt + '\n\n' + text }] });
+  } else {
+    messages.push(userMsg);
+  }
+
   addMsg('user', text);
   promptEl.value = ''; promptEl.style.height = 'auto';
   sendBtn.disabled = true;
 
   const modelId = getModel();
-  const bodyEl = addMsg('model', '', modelId);
-  const msgDiv = bodyEl.parentElement;
+  const { div: thinkDiv, content: thinkContent } = showThinking(modelId);
 
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: user.email,
-        model: modelId,
+        email: user.email, model: modelId,
         location: document.getElementById('region-select').value,
-        messages,
-        temperature: parseFloat(tempS.value),
-        maxTokens: parseInt(maxS.value),
+        messages, temperature: parseFloat(document.getElementById('temp').value),
+        maxTokens: parseInt(document.getElementById('maxtok').value),
         googleSearch: document.getElementById('search-toggle').checked,
       }),
     });
@@ -475,9 +459,16 @@ async function send() {
     if (!resp.ok) {
       let errMsg = resp.statusText;
       try { errMsg = (await resp.json()).error || errMsg; } catch {}
-      bodyEl.textContent = 'Error: ' + errMsg;
+      thinkDiv.remove();
+      addMsg('model', 'Error: ' + errMsg, modelId);
       messages.pop(); sendBtn.disabled = false; return;
     }
+
+    // Replace thinking indicator with response body
+    const thinkingEl = thinkContent.querySelector('.thinking');
+
+    const bodyEl = document.createElement('div'); bodyEl.className = 'msg-body';
+    thinkContent.replaceChild(bodyEl, thinkingEl);
 
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
@@ -494,48 +485,68 @@ async function send() {
         if (!d || d === '[DONE]') continue;
         try {
           const chunk = JSON.parse(d);
-          if (chunk.error) { bodyEl.textContent = 'Error: ' + chunk.error; messages.pop(); sendBtn.disabled = false; return; }
+          if (chunk.error) {
+            bodyEl.textContent = 'Error: ' + chunk.error;
+            messages.pop(); sendBtn.disabled = false; return;
+          }
           const parts = chunk.candidates?.[0]?.content?.parts;
-          if (parts) for (const p of parts) { if (p.text) { full += p.text; bodyEl.textContent = full; chatEl.scrollTop = chatEl.scrollHeight; } }
-          if (chunk.usageMetadata) usage = chunk.usageMetadata;
-          // Collect grounding sources
-          const gm = chunk.candidates?.[0]?.groundingMetadata;
-          if (gm?.groundingChunks) {
-            for (const gc of gm.groundingChunks) {
-              if (gc.web) groundingSources.push(gc.web);
+          if (parts) for (const p of parts) {
+            if (p.text) {
+              full += p.text;
+              bodyEl.textContent = full;  // live text update
+              chatArea.scrollTop = chatArea.scrollHeight;
             }
           }
+          if (chunk.usageMetadata) usage = chunk.usageMetadata;
+          const gm = chunk.candidates?.[0]?.groundingMetadata;
+          if (gm?.groundingChunks) for (const gc of gm.groundingChunks) { if (gc.web) groundingSources.push(gc.web); }
         } catch {}
       }
     }
 
-    if (!full) { bodyEl.textContent = 'Error: Empty response'; messages.pop(); sendBtn.disabled = false; return; }
+    if (!full) {
+      bodyEl.textContent = 'Error: Empty response from model';
+      messages.pop(); sendBtn.disabled = false; return;
+    }
 
-    // Render final markdown
+    // Final markdown render
     bodyEl.innerHTML = renderMd(full);
-
     messages.push({ role: 'model', parts: [{ text: full }] });
 
-    // Show grounding sources
+    // Footer: sources + usage
+    const footer = document.createElement('div'); footer.className = 'msg-footer';
+
     if (groundingSources.length > 0) {
-      const srcDiv = document.createElement('div'); srcDiv.className = 'sources';
+      const srcDiv = document.createElement('div'); srcDiv.className = 'msg-sources';
       const unique = [...new Map(groundingSources.map(s => [s.uri, s])).values()];
-      srcDiv.innerHTML = 'Sources: ' + unique.map(s =>
-        `<a href="${s.uri}" target="_blank">${s.title || s.domain || s.uri}</a>`
-      ).join('');
-      msgDiv.appendChild(srcDiv);
+      srcDiv.innerHTML = unique.map(s => `<a href="${s.uri}" target="_blank" title="${s.uri}">${s.title || s.domain || 'Source'}</a>`).join('');
+      footer.appendChild(srcDiv);
     }
 
     if (usage) {
-      const pi = usage.promptTokenCount || 0, co = usage.candidatesTokenCount || 0, tt = usage.totalTokenCount || 0;
+      const pi = usage.promptTokenCount||0, co = usage.candidatesTokenCount||0, tt = usage.totalTokenCount||0;
       totIn += pi; totOut += co;
-      const u = document.createElement('div'); u.className = 'usage';
+      const u = document.createElement('div'); u.className = 'msg-usage';
       u.textContent = `${pi.toLocaleString()} in + ${co.toLocaleString()} out = ${tt.toLocaleString()} total`;
-      msgDiv.appendChild(u); updateStats();
+      footer.appendChild(u); updateStats();
     }
-  } catch (e) { bodyEl.textContent = 'Error: ' + e.message; messages.pop(); }
+
+    if (footer.children.length) thinkContent.appendChild(footer);
+
+  } catch (e) {
+    thinkDiv.remove();
+    addMsg('model', 'Error: ' + e.message, modelId);
+    messages.pop();
+  }
   sendBtn.disabled = false; promptEl.focus();
 }
+
+// ── Init ──
+window.addEventListener('load', () => {
+  const saved = localStorage.getItem('tb-user');
+  if (saved) { user = JSON.parse(saved); afterLogin(); }
+  updateModelInfo();
+});
 </script>
 </body>
 </html>
