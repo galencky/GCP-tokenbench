@@ -12,6 +12,7 @@ import requests as req_lib
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "dev-secret-change-in-prod")
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max request
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "local_data"))
 DATA_DIR.mkdir(exist_ok=True)
