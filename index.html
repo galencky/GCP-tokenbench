@@ -412,19 +412,35 @@
   </button>
 </div>
 
-<!-- Setup Panel (API Key) -->
+<!-- Setup Panel (Service Account) -->
 <div id="setup-panel" class="hidden">
   <div class="setup-card">
     <div class="user-info" id="setup-user-info"></div>
-    <h2>Enter your Gemini API Key</h2>
+    <h2>Connect your GCP Project</h2>
     <p>
-      Get your API key from
-      <a href="https://aistudio.google.com/apikey" target="_blank" style="color: var(--accent);">Google AI Studio</a>.
-      Your key is stored only in your browser's local storage and sent directly to Google's API — it never touches our server.
+      Upload your service account JSON key to authenticate with Vertex AI.
+      Your key is stored only in your browser's session storage and sent to our API route for authentication — it is never persisted server-side.<br><br>
+      <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" style="color: var(--accent);">Create a service account</a> with the <strong>Vertex AI User</strong> role, then download its JSON key.
     </p>
-    <label>Gemini API Key</label>
-    <input type="password" id="api-key-input" placeholder="AIza...">
-    <button class="btn-primary" onclick="saveApiKey()">Start Chatting</button>
+    <label>GCP Project ID</label>
+    <input type="text" id="project-id-input" placeholder="my-project-123">
+    <label>Service Account JSON Key</label>
+    <div style="margin-bottom: 16px;">
+      <input type="file" id="sa-key-file" accept=".json" style="display:none;">
+      <button class="header-btn" style="width:100%; padding:10px;" onclick="document.getElementById('sa-key-file').click()">
+        Upload JSON key file
+      </button>
+      <div id="sa-key-status" style="font-size:12px; color: var(--text-dim); margin-top:6px;"></div>
+    </div>
+    <label>Region</label>
+    <select id="region-input" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:10px 14px; border-radius:8px; font-size:14px; margin-bottom:16px;">
+      <option value="us-central1">us-central1 (Iowa)</option>
+      <option value="us-east4">us-east4 (Virginia)</option>
+      <option value="us-west1">us-west1 (Oregon)</option>
+      <option value="europe-west1">europe-west1 (Belgium)</option>
+      <option value="asia-southeast1">asia-southeast1 (Singapore)</option>
+    </select>
+    <button class="btn-primary" onclick="saveCredentials()">Start Chatting</button>
   </div>
 </div>
 
@@ -433,7 +449,7 @@
   <div class="header-left">
     <h1>GCP Token Bench</h1>
     <div class="user-chip" id="header-user-chip"></div>
-    <span class="api-key-masked" id="header-api-key"></span>
+    <span class="api-key-masked" id="header-project-id"></span>
   </div>
   <div class="controls">
     <div>
@@ -452,7 +468,7 @@
       <input type="range" id="max-tokens" min="256" max="65536" step="256" value="8192">
     </div>
     <button class="header-btn" onclick="newChat()">New Chat</button>
-    <button class="header-btn" onclick="changeApiKey()">Change Key</button>
+    <button class="header-btn" onclick="changeCredentials()">Change Key</button>
     <button class="header-btn danger" onclick="signOut()">Sign Out</button>
   </div>
 </header>
@@ -461,7 +477,7 @@
   <div class="welcome">
     <h2>Ready to go</h2>
     <p>Choose a model above and type your prompt below.<br>
-    Responses stream directly from Google's Gemini API using your API key.<br>
+    Responses are routed through Vertex AI using your service account.<br>
     All costs count against your GCP $300 credit.</p>
   </div>
 </div>
@@ -480,17 +496,12 @@
 <script>
 // ── State ──
 let currentUser = null;
-let apiKey = null;
+let serviceAccountKey = null;
+let projectId = null;
+let region = 'us-central1';
 let messages = [];
 let totalPromptTokens = 0;
 let totalCompletionTokens = 0;
-
-const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models';
-
-const MODEL_IDS = {
-  'gemini-2.5-pro':   'gemini-2.5-pro-preview-05-06',
-  'gemini-2.5-flash': 'gemini-2.5-flash-preview-04-17',
-};
 
 const PRICING = {
   'gemini-2.5-pro':   { input: 1.25, output: 10.00 },
@@ -524,8 +535,14 @@ function bypassAuth() {
 
 function afterAuth() {
   document.getElementById('auth-overlay').classList.add('hidden');
-  apiKey = localStorage.getItem('gcp-tb-apikey');
-  if (apiKey) {
+  // Load credentials from sessionStorage
+  const savedKey = sessionStorage.getItem('gcp-tb-sakey');
+  const savedProject = sessionStorage.getItem('gcp-tb-project');
+  const savedRegion = sessionStorage.getItem('gcp-tb-region');
+  if (savedKey && savedProject) {
+    serviceAccountKey = savedKey;
+    projectId = savedProject;
+    region = savedRegion || 'us-central1';
     showApp();
   } else {
     showSetup();
@@ -542,30 +559,74 @@ function showSetup() {
   } else {
     info.innerHTML = `<div><div class="name">${currentUser.name}</div><div class="email">${currentUser.email}</div></div>`;
   }
+
+  // Restore project ID if saved
+  const saved = sessionStorage.getItem('gcp-tb-project');
+  if (saved) document.getElementById('project-id-input').value = saved;
 }
 
-function saveApiKey() {
-  const key = document.getElementById('api-key-input').value.trim();
-  if (!key) { alert('Please enter your API key'); return; }
-  apiKey = key;
-  localStorage.setItem('gcp-tb-apikey', apiKey);
+// Handle file upload
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('sa-key-file').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const key = JSON.parse(ev.target.result);
+        serviceAccountKey = ev.target.result;
+        const status = document.getElementById('sa-key-status');
+        status.style.color = 'var(--flash)';
+        status.textContent = `Loaded: ${key.client_email || file.name}`;
+        // Auto-fill project ID from key if empty
+        const projInput = document.getElementById('project-id-input');
+        if (!projInput.value && key.project_id) {
+          projInput.value = key.project_id;
+        }
+      } catch {
+        const status = document.getElementById('sa-key-status');
+        status.style.color = 'var(--danger)';
+        status.textContent = 'Invalid JSON file';
+      }
+    };
+    reader.readAsText(file);
+  });
+});
+
+function saveCredentials() {
+  const proj = document.getElementById('project-id-input').value.trim();
+  if (!proj) { alert('Please enter your GCP Project ID'); return; }
+  if (!serviceAccountKey) { alert('Please upload your service account JSON key'); return; }
+
+  projectId = proj;
+  region = document.getElementById('region-input').value;
+
+  sessionStorage.setItem('gcp-tb-sakey', serviceAccountKey);
+  sessionStorage.setItem('gcp-tb-project', projectId);
+  sessionStorage.setItem('gcp-tb-region', region);
+
   document.getElementById('setup-panel').classList.add('hidden');
   showApp();
 }
 
-function changeApiKey() {
+function changeCredentials() {
   document.getElementById('app-header').style.display = 'none';
   document.getElementById('chat').style.display = 'none';
   document.getElementById('input-area').style.display = 'none';
-  document.getElementById('api-key-input').value = '';
+  serviceAccountKey = null;
+  document.getElementById('sa-key-status').textContent = '';
+  document.getElementById('sa-key-file').value = '';
   showSetup();
 }
 
 function signOut() {
   localStorage.removeItem('gcp-tb-user');
-  localStorage.removeItem('gcp-tb-apikey');
+  sessionStorage.removeItem('gcp-tb-sakey');
+  sessionStorage.removeItem('gcp-tb-project');
+  sessionStorage.removeItem('gcp-tb-region');
   currentUser = null;
-  apiKey = null;
+  serviceAccountKey = null;
+  projectId = null;
   location.reload();
 }
 
@@ -584,9 +645,8 @@ function showApp() {
     chip.innerHTML = `<span>${currentUser.name}</span>`;
   }
 
-  // Masked key
-  const masked = apiKey.slice(0, 6) + '...' + apiKey.slice(-4);
-  document.getElementById('header-api-key').textContent = masked;
+  // Show project ID
+  document.getElementById('header-project-id').textContent = projectId;
 
   document.getElementById('prompt').focus();
 }
@@ -722,7 +782,7 @@ function newChat() {
 
 async function send() {
   const text = promptEl.value.trim();
-  if (!text || !apiKey) return;
+  if (!text || !serviceAccountKey || !projectId) return;
 
   messages.push({ role: 'user', parts: [{ text }] });
   addMessage('user', text);
@@ -731,31 +791,27 @@ async function send() {
   sendBtn.disabled = true;
 
   const model = getModel();
-  const modelId = MODEL_IDS[model];
   const contentEl = addMessage('model', '', model);
   const msgDiv = contentEl.parentElement;
 
   try {
-    const url = `${GEMINI_API}/${modelId}:streamGenerateContent?alt=sse&key=${apiKey}`;
-
-    const body = {
-      contents: messages,
-      generationConfig: {
-        temperature: parseFloat(tempSlider.value),
-        maxOutputTokens: parseInt(maxTokSlider.value),
-      },
-    };
-
-    const resp = await fetch(url, {
+    const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        serviceAccountKey,
+        projectId,
+        location: region,
+        model,
+        messages,
+        temperature: parseFloat(tempSlider.value),
+        maxTokens: parseInt(maxTokSlider.value),
+      }),
     });
 
     if (!resp.ok) {
       const err = await resp.json();
-      const errMsg = err.error?.message || resp.statusText;
-      contentEl.textContent = `Error: ${errMsg}`;
+      contentEl.textContent = `Error: ${err.error || resp.statusText}`;
       messages.pop();
       sendBtn.disabled = false;
       return;
