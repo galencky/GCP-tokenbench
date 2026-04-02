@@ -4,397 +4,536 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GCP Token Bench</title>
+<script src="https://accounts.google.com/gsi/client" async></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1b26;
-    --border: #2a2b3d;
-    --text: #c0caf5;
-    --text-dim: #565f89;
-    --accent: #7aa2f7;
-    --accent-hover: #89b4fa;
-    --user-bg: #1e2030;
-    --model-bg: #16161e;
-    --pro: #bb9af7;
-    --flash: #9ece6a;
-    --danger: #f7768e;
+    --bg: #0f1117; --surface: #1a1b26; --border: #2a2b3d;
+    --text: #c0caf5; --dim: #565f89; --accent: #7aa2f7; --accent2: #89b4fa;
+    --user-bg: #1e2030; --model-bg: #16161e;
+    --pro: #bb9af7; --flash: #9ece6a; --danger: #f7768e; --warn: #e0af68;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    background: var(--bg); color: var(--text);
-    height: 100vh; display: flex; flex-direction: column;
-  }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
 
-  /* ── Setup ── */
-  #setup {
-    position: fixed; inset: 0; background: var(--bg);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 100; flex-direction: column; gap: 20px;
-  }
-  #setup.hidden { display: none; }
-  .setup-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 16px; padding: 32px; max-width: 500px; width: 90%;
-  }
-  .setup-card h1 { font-size: 24px; color: var(--accent); margin-bottom: 6px; }
-  .setup-card p { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
-  .setup-card label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 6px; }
-  .setup-card input, .setup-card select {
-    width: 100%; background: var(--bg); border: 1px solid var(--border);
-    color: var(--text); padding: 10px 14px; border-radius: 8px;
-    font-size: 14px; margin-bottom: 16px;
-  }
-  .setup-card input:focus, .setup-card select:focus { outline: none; border-color: var(--accent); }
-  .file-btn {
-    width: 100%; padding: 12px; background: var(--bg); border: 1px dashed var(--border);
-    color: var(--text-dim); border-radius: 8px; cursor: pointer; font-size: 13px;
-    margin-bottom: 6px; text-align: center;
-  }
-  .file-btn:hover { border-color: var(--accent); color: var(--accent); }
-  #sa-status { font-size: 12px; margin-bottom: 16px; min-height: 18px; }
-  .btn-primary {
-    background: var(--accent); color: var(--bg); border: none;
-    padding: 12px 24px; border-radius: 8px; font-size: 14px;
-    font-weight: 600; cursor: pointer; width: 100%;
-  }
-  .btn-primary:hover { background: var(--accent-hover); }
+  /* Overlays */
+  .overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 100; flex-direction: column; gap: 24px; }
+  .overlay.hidden { display: none; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; max-width: 500px; width: 90%; }
+  .card h1, .card h2 { color: var(--accent); margin-bottom: 8px; }
+  .card h1 { font-size: 26px; }
+  .card h2 { font-size: 20px; }
+  .card p { color: var(--dim); font-size: 13px; margin-bottom: 20px; line-height: 1.6; }
+  .card label { font-size: 12px; color: var(--dim); display: block; margin-bottom: 6px; }
+  .card input, .card select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 14px; }
+  .card input:focus, .card select:focus { outline: none; border-color: var(--accent); }
+  .file-drop { width: 100%; padding: 16px; background: var(--bg); border: 2px dashed var(--border); color: var(--dim); border-radius: 8px; cursor: pointer; font-size: 13px; margin-bottom: 8px; text-align: center; transition: border-color 0.2s; }
+  .file-drop:hover { border-color: var(--accent); color: var(--accent); }
+  .file-drop.active { border-color: var(--flash); color: var(--flash); }
+  #sa-status { font-size: 12px; min-height: 18px; margin-bottom: 14px; }
+  .btn { border: none; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; }
+  .btn-primary { background: var(--accent); color: var(--bg); }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  /* ── Header ── */
-  header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 20px; border-bottom: 1px solid var(--border);
-    background: var(--surface); flex-wrap: wrap; gap: 8px;
-  }
-  .header-left { display: flex; align-items: center; gap: 14px; }
-  header h1 { font-size: 18px; font-weight: 600; color: var(--accent); }
-  .project-label { font-size: 11px; color: var(--text-dim); font-family: monospace; }
-  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .controls label { font-size: 11px; color: var(--text-dim); }
-  .controls select {
-    background: var(--bg); border: 1px solid var(--border); color: var(--text);
-    padding: 5px 8px; border-radius: 6px; font-size: 13px; cursor: pointer;
-  }
-  .controls select:focus { outline: none; border-color: var(--accent); }
-  .slider-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .slider-group input[type="range"] { width: 80px; accent-color: var(--accent); }
-  .header-btn {
-    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
-    padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;
-  }
-  .header-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .header-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
-  .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; }
+  /* Login bypass */
+  .dev-bypass { font-size: 12px; color: var(--dim); cursor: pointer; text-decoration: underline; }
+  .dev-bypass:hover { color: var(--accent); }
+
+  /* Header */
+  header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface); flex-wrap: wrap; gap: 6px; }
+  .hdr-left { display: flex; align-items: center; gap: 12px; }
+  .hdr-left h1 { font-size: 16px; font-weight: 600; color: var(--accent); }
+  .hdr-chip { display: flex; align-items: center; gap: 6px; background: var(--bg); padding: 3px 10px 3px 3px; border-radius: 16px; border: 1px solid var(--border); }
+  .hdr-chip img { width: 22px; height: 22px; border-radius: 50%; }
+  .hdr-chip span { font-size: 11px; color: var(--dim); }
+  .hdr-project { font-size: 11px; color: var(--dim); font-family: monospace; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls label { font-size: 10px; color: var(--dim); }
+  .controls select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 6px; border-radius: 6px; font-size: 12px; cursor: pointer; width: auto; margin-bottom: 0; }
+  .slider-grp { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+  .slider-grp input[type="range"] { width: 70px; accent-color: var(--accent); }
+  .hdr-btn { background: transparent; border: 1px solid var(--border); color: var(--dim); padding: 4px 8px; border-radius: 6px; font-size: 11px; cursor: pointer; }
+  .hdr-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .hdr-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+
+  /* Model info */
+  .model-info { font-size: 10px; color: var(--dim); padding: 4px 0; }
+  .model-info .price { color: var(--warn); }
+
+  /* Chat */
+  #chat-area { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 800px; width: 100%; margin: 0 auto; padding: 12px 16px; border-radius: 10px; line-height: 1.6; font-size: 14px; word-wrap: break-word; }
+  .msg.user { background: var(--user-bg); border: 1px solid var(--border); }
+  .msg.model { background: var(--model-bg); }
+  .msg .meta { font-size: 11px; color: var(--dim); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .msg .body { color: var(--text); }
+  .msg .body p { margin: 0.4em 0; }
+  .msg .body pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 0.5em 0; }
+  .msg .body code { background: var(--bg); padding: 1px 4px; border-radius: 3px; font-size: 13px; }
+  .msg .body pre code { background: none; padding: 0; }
+  .msg .body ul, .msg .body ol { margin: 0.4em 0 0.4em 1.5em; }
+  .msg .body h1, .msg .body h2, .msg .body h3 { margin: 0.6em 0 0.3em; color: var(--accent); }
+  .msg .body blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: var(--dim); margin: 0.4em 0; }
+  .msg .body table { border-collapse: collapse; margin: 0.5em 0; }
+  .msg .body th, .msg .body td { border: 1px solid var(--border); padding: 4px 8px; font-size: 13px; }
+  .msg .body a { color: var(--accent); }
+  .msg.user .body { white-space: pre-wrap; }
+  .sources { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  .sources a { color: var(--accent); margin-right: 10px; }
+  .msg .usage { font-size: 10px; color: var(--dim); margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border); }
+  .badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; text-transform: uppercase; }
+  .badge-3 { background: rgba(224,175,104,0.15); color: var(--warn); }
   .badge-pro { background: rgba(187,154,247,0.15); color: var(--pro); }
   .badge-flash { background: rgba(158,206,106,0.15); color: var(--flash); }
+  .welcome { max-width: 600px; margin: auto; text-align: center; color: var(--dim); line-height: 1.8; }
+  .welcome h2 { color: var(--accent); font-size: 20px; margin-bottom: 8px; }
 
-  /* ── Chat ── */
-  #chat {
-    flex: 1; overflow-y: auto; padding: 20px;
-    display: flex; flex-direction: column; gap: 16px;
-  }
-  .message {
-    max-width: 800px; width: 100%; margin: 0 auto;
-    padding: 14px 18px; border-radius: 12px;
-    line-height: 1.6; font-size: 14px; white-space: pre-wrap; word-wrap: break-word;
-  }
-  .message.user { background: var(--user-bg); border: 1px solid var(--border); }
-  .message.model { background: var(--model-bg); border: 1px solid transparent; }
-  .message .meta { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
-  .message .content { color: var(--text); }
-  .usage { font-size: 11px; color: var(--text-dim); margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
-
-  /* ── Input ── */
-  #input-area { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface); }
-  #input-wrap { max-width: 800px; margin: 0 auto; display: flex; gap: 10px; }
-  #prompt {
-    flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text);
-    padding: 12px 16px; border-radius: 10px; font-size: 14px; font-family: inherit;
-    resize: none; min-height: 48px; max-height: 200px;
-  }
+  /* Input */
+  #input-bar { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface); }
+  #input-wrap { max-width: 800px; margin: 0 auto; display: flex; gap: 8px; }
+  #prompt { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 10px; font-size: 14px; font-family: inherit; resize: none; min-height: 44px; max-height: 200px; }
   #prompt:focus { outline: none; border-color: var(--accent); }
-  #send-btn {
-    background: var(--accent); color: var(--bg); border: none; padding: 0 20px;
-    border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
-  }
-  #send-btn:hover { background: var(--accent-hover); }
+  #send-btn { background: var(--accent); color: var(--bg); border: none; padding: 0 18px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  #send-btn:hover { background: var(--accent2); }
   #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .cost-bar {
-    max-width: 800px; margin: 8px auto 0; font-size: 11px;
-    color: var(--text-dim); display: flex; justify-content: space-between;
-  }
-  .welcome { max-width: 600px; margin: auto; text-align: center; color: var(--text-dim); line-height: 1.8; }
-  .welcome h2 { color: var(--accent); font-size: 22px; margin-bottom: 12px; }
+  .stats-bar { max-width: 800px; margin: 6px auto 0; font-size: 10px; color: var(--dim); display: flex; justify-content: space-between; }
 </style>
 </head>
 <body>
 
-<!-- Setup -->
-<div id="setup">
-  <div class="setup-card">
+<!-- ═══ LOGIN ═══ -->
+<div id="login-screen" class="overlay">
+  <div class="card" style="text-align:center;">
     <h1>GCP Token Bench</h1>
+    <p>Run prompts against Gemini models using your GCP $300 free credit.<br>Sign in with Google to get started.</p>
+    <div id="g-signin-btn" style="display:inline-block;"></div>
+    <br><br>
+    <span class="dev-bypass" id="dev-bypass">Continue without sign-in (local dev)</span>
+  </div>
+</div>
+
+<!-- ═══ KEY SETUP ═══ -->
+<div id="key-screen" class="overlay hidden">
+  <div class="card">
+    <h2>Connect your GCP Project</h2>
     <p>
-      Connect your GCP project to run prompts against Gemini via Vertex AI.
-      Costs bill against your $300 free trial credit.<br><br>
-      <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" style="color:var(--accent)">Create a service account</a>
-      with the <strong>Vertex AI User</strong> role, then download its JSON key.
+      Upload your service account JSON key. It will be saved server-side so you don't need to upload it again.<br>
+      <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" style="color:var(--accent)">Create a service account</a> with the <b>Vertex AI User</b> role.
     </p>
-    <label>GCP Project ID</label>
-    <input type="text" id="inp-project" placeholder="my-project-123">
-    <label>Service Account JSON Key</label>
-    <input type="file" id="inp-sa-file" accept=".json" style="display:none">
-    <div class="file-btn" onclick="document.getElementById('inp-sa-file').click()">
-      Click to upload JSON key file
+    <input type="file" id="sa-file" accept=".json" style="display:none">
+    <div class="file-drop" id="file-drop" onclick="document.getElementById('sa-file').click()">
+      Click or drag to upload JSON key file
     </div>
     <div id="sa-status"></div>
     <label>Region</label>
-    <select id="inp-region">
+    <select id="setup-region">
       <option value="us-central1">us-central1 (Iowa)</option>
       <option value="us-east4">us-east4 (Virginia)</option>
       <option value="us-west1">us-west1 (Oregon)</option>
       <option value="europe-west1">europe-west1 (Belgium)</option>
       <option value="asia-southeast1">asia-southeast1 (Singapore)</option>
     </select>
-    <button class="btn-primary" onclick="connect()">Start Chatting</button>
+    <button class="btn btn-primary" id="save-key-btn" onclick="saveKey()" disabled>Connect & Start</button>
   </div>
 </div>
 
-<!-- App -->
+<!-- ═══ MAIN APP ═══ -->
 <header id="app-header" style="display:none">
-  <div class="header-left">
-    <h1>GCP Token Bench</h1>
-    <span class="project-label" id="hdr-project"></span>
+  <div class="hdr-left">
+    <h1>Token Bench</h1>
+    <div class="hdr-chip" id="hdr-user"></div>
+    <span class="hdr-project" id="hdr-project"></span>
   </div>
   <div class="controls">
     <div>
       <label>Model</label><br>
-      <select id="model-select">
-        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+      <select id="model-select" onchange="updateModelInfo()">
+        {% for id, m in models.items() %}
+        <option value="{{ id }}">{{ m.name }}</option>
+        {% endfor %}
+      </select>
+      <div class="model-info" id="model-info"></div>
+    </div>
+    <div>
+      <label>Region</label><br>
+      <select id="region-select">
+        <option value="us-central1">us-central1</option>
+        <option value="us-east4">us-east4</option>
+        <option value="us-west1">us-west1</option>
+        <option value="europe-west1">europe-west1</option>
+        <option value="asia-southeast1">asia-southeast1</option>
       </select>
     </div>
-    <div class="slider-group">
-      <label>Temp: <span id="temp-val">1.0</span></label>
-      <input type="range" id="temperature" min="0" max="2" step="0.1" value="1.0">
+    <div class="slider-grp">
+      <label>Temp: <span id="tv">1.0</span></label>
+      <input type="range" id="temp" min="0" max="2" step="0.1" value="1.0">
     </div>
-    <div class="slider-group">
-      <label>Max tokens: <span id="max-tok-val">8192</span></label>
-      <input type="range" id="max-tokens" min="256" max="65536" step="256" value="8192">
+    <div class="slider-grp">
+      <label>Max: <span id="mv">8192</span></label>
+      <input type="range" id="maxtok" min="256" max="65536" step="256" value="8192">
     </div>
-    <button class="header-btn" onclick="newChat()">New Chat</button>
-    <button class="header-btn" onclick="changeKey()">Change Key</button>
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+      <input type="checkbox" id="search-toggle" style="accent-color:var(--accent);">
+      <span style="font-size:11px;color:var(--dim);">Google Search</span>
+    </label>
+    <button class="hdr-btn" onclick="newChat()">New Chat</button>
+    <button class="hdr-btn" onclick="reuploadKey()">Change Key</button>
+    <button class="hdr-btn danger" onclick="logout()">Sign Out</button>
   </div>
 </header>
 
-<div id="chat" style="display:none">
-  <div class="welcome">
-    <h2>Ready to go</h2>
-    <p>Pick a model and type your prompt below.<br>
-    Responses stream from Vertex AI using your service account.</p>
-  </div>
+<div id="chat-area" style="display:none">
+  <div class="welcome"><h2>Ready</h2><p>Pick a model and send a prompt.</p></div>
 </div>
 
-<div id="input-area" style="display:none">
+<div id="input-bar" style="display:none">
   <div id="input-wrap">
     <textarea id="prompt" rows="1" placeholder="Type your prompt..."></textarea>
     <button id="send-btn" onclick="send()">Send</button>
   </div>
-  <div class="cost-bar">
-    <span id="session-stats">Tokens: 0 prompt / 0 completion</span>
-    <span id="session-cost">Estimated cost: $0.0000</span>
+  <div class="stats-bar">
+    <span id="stats">Tokens: 0 in / 0 out</span>
+    <span id="cost">$0.0000</span>
   </div>
 </div>
 
 <script>
-let saKey = null;
-let projectId = null;
+// ── State ──
+let user = null;   // { name, email, picture }
+let projectId = '';
 let region = 'us-central1';
+let saKeyRaw = null; // raw JSON string for initial upload
 let messages = [];
-let totalPT = 0, totalCT = 0;
+let totIn = 0, totOut = 0;
 
-const PRICING = {
-  'gemini-2.5-pro':   { input: 1.25, output: 10.00 },
-  'gemini-2.5-flash': { input: 0.15, output: 0.60 },
+const MODELS = {{ models | tojson }};
+
+// ── Google Sign-In ──
+function onGsiLoad() {
+  if (!window.google?.accounts?.id) {
+    setTimeout(onGsiLoad, 200);
+    return;
+  }
+  // Try to init - will fail silently if no client ID configured
+  try {
+    google.accounts.id.initialize({
+      client_id: '{{ config.get("GOOGLE_CLIENT_ID", "") }}',
+      callback: onGoogleLogin,
+    });
+    google.accounts.id.renderButton(document.getElementById('g-signin-btn'), {
+      type: 'standard', theme: 'filled_black', size: 'large', text: 'signin_with',
+    });
+  } catch (e) {
+    // No client ID - show dev bypass only
+  }
+}
+window.addEventListener('load', onGsiLoad);
+
+function onGoogleLogin(resp) {
+  const p = parseJwt(resp.credential);
+  user = { name: p.name, email: p.email, picture: p.picture };
+  localStorage.setItem('tb-user', JSON.stringify(user));
+  afterLogin();
+}
+
+function parseJwt(t) {
+  const b = t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
+  return JSON.parse(decodeURIComponent(atob(b).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join('')));
+}
+
+document.getElementById('dev-bypass').onclick = () => {
+  user = { name: 'Local Dev', email: 'dev@localhost', picture: '' };
+  localStorage.setItem('tb-user', JSON.stringify(user));
+  afterLogin();
 };
 
-// ── Setup ──
-document.getElementById('inp-sa-file').addEventListener('change', e => {
-  const file = e.target.files[0];
+// ── Auth flow ──
+async function afterLogin() {
+  document.getElementById('login-screen').classList.add('hidden');
+
+  // Check if user already has a key saved
+  const resp = await fetch('/api/check-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: user.email }),
+  });
+  const data = await resp.json();
+
+  if (data.has_key) {
+    projectId = data.project_id;
+    showApp();
+  } else {
+    showKeyScreen();
+  }
+}
+
+function showKeyScreen() {
+  document.getElementById('key-screen').classList.remove('hidden');
+}
+
+// File upload
+const saFileInput = document.getElementById('sa-file');
+const fileDrop = document.getElementById('file-drop');
+
+saFileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+fileDrop.addEventListener('dragover', e => { e.preventDefault(); fileDrop.classList.add('active'); });
+fileDrop.addEventListener('dragleave', () => fileDrop.classList.remove('active'));
+fileDrop.addEventListener('drop', e => { e.preventDefault(); fileDrop.classList.remove('active'); handleFile(e.dataTransfer.files[0]); });
+
+function handleFile(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
       const key = JSON.parse(ev.target.result);
-      saKey = ev.target.result;
+      saKeyRaw = ev.target.result;
       const st = document.getElementById('sa-status');
       st.style.color = 'var(--flash)';
       st.textContent = 'Loaded: ' + (key.client_email || file.name);
-      if (!document.getElementById('inp-project').value && key.project_id)
-        document.getElementById('inp-project').value = key.project_id;
+      document.getElementById('save-key-btn').disabled = false;
+      fileDrop.textContent = file.name;
+      fileDrop.classList.add('active');
     } catch {
-      const st = document.getElementById('sa-status');
-      st.style.color = 'var(--danger)';
-      st.textContent = 'Invalid JSON file';
+      document.getElementById('sa-status').style.color = 'var(--danger)';
+      document.getElementById('sa-status').textContent = 'Invalid JSON file';
     }
   };
   reader.readAsText(file);
-});
+}
 
-function connect() {
-  projectId = document.getElementById('inp-project').value.trim();
-  region = document.getElementById('inp-region').value;
-  if (!projectId) return alert('Enter your GCP Project ID');
-  if (!saKey) return alert('Upload your service account JSON key');
-  document.getElementById('setup').classList.add('hidden');
+async function saveKey() {
+  if (!saKeyRaw) return;
+  const btn = document.getElementById('save-key-btn');
+  btn.disabled = true;
+  btn.textContent = 'Validating...';
+
+  region = document.getElementById('setup-region').value;
+
+  const resp = await fetch('/api/save-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: user.email, serviceAccountKey: saKeyRaw }),
+  });
+  const data = await resp.json();
+
+  if (data.error) {
+    document.getElementById('sa-status').style.color = 'var(--danger)';
+    document.getElementById('sa-status').textContent = 'Error: ' + data.error;
+    btn.disabled = false;
+    btn.textContent = 'Connect & Start';
+    return;
+  }
+
+  projectId = data.project_id;
+  saKeyRaw = null; // clear from memory
+  document.getElementById('key-screen').classList.add('hidden');
+  showApp();
+}
+
+function reuploadKey() {
+  hideApp();
+  saKeyRaw = null;
+  document.getElementById('sa-status').textContent = '';
+  document.getElementById('sa-file').value = '';
+  document.getElementById('file-drop').textContent = 'Click or drag to upload JSON key file';
+  document.getElementById('file-drop').classList.remove('active');
+  document.getElementById('save-key-btn').disabled = true;
+  document.getElementById('save-key-btn').textContent = 'Connect & Start';
+  showKeyScreen();
+}
+
+function logout() {
+  localStorage.removeItem('tb-user');
+  user = null;
+  location.reload();
+}
+
+// ── App ──
+function showApp() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('key-screen').classList.add('hidden');
   document.getElementById('app-header').style.display = 'flex';
-  document.getElementById('chat').style.display = 'flex';
-  document.getElementById('input-area').style.display = 'block';
+  document.getElementById('chat-area').style.display = 'flex';
+  document.getElementById('input-bar').style.display = 'block';
+
+  const chip = document.getElementById('hdr-user');
+  chip.innerHTML = user.picture
+    ? `<img src="${user.picture}"><span>${user.name}</span>`
+    : `<span>${user.name}</span>`;
   document.getElementById('hdr-project').textContent = projectId;
+  document.getElementById('region-select').value = region;
+  updateModelInfo();
   document.getElementById('prompt').focus();
 }
 
-function changeKey() {
+function hideApp() {
   document.getElementById('app-header').style.display = 'none';
-  document.getElementById('chat').style.display = 'none';
-  document.getElementById('input-area').style.display = 'none';
-  document.getElementById('setup').classList.remove('hidden');
-  saKey = null;
-  document.getElementById('sa-status').textContent = '';
-  document.getElementById('inp-sa-file').value = '';
+  document.getElementById('chat-area').style.display = 'none';
+  document.getElementById('input-bar').style.display = 'none';
+}
+
+// Check saved session on load
+window.addEventListener('load', () => {
+  const saved = localStorage.getItem('tb-user');
+  if (saved) { user = JSON.parse(saved); afterLogin(); }
+});
+
+// ── Model info ──
+function updateModelInfo() {
+  const m = MODELS[document.getElementById('model-select').value];
+  if (!m) return;
+  document.getElementById('model-info').innerHTML =
+    `<span class="price">$${m.input_price}/M in · $${m.output_price}/M out</span> · ${(m.context/1e6).toFixed(1)}M ctx`;
 }
 
 // ── Chat ──
-const chatEl = document.getElementById('chat');
+const chatEl = document.getElementById('chat-area');
 const promptEl = document.getElementById('prompt');
 const sendBtn = document.getElementById('send-btn');
-const tempSlider = document.getElementById('temperature');
-const maxTokSlider = document.getElementById('max-tokens');
+const tempS = document.getElementById('temp');
+const maxS = document.getElementById('maxtok');
 
-tempSlider.oninput = () => document.getElementById('temp-val').textContent = tempSlider.value;
-maxTokSlider.oninput = () => document.getElementById('max-tok-val').textContent = maxTokSlider.value;
-
-promptEl.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-});
-promptEl.addEventListener('input', () => {
-  promptEl.style.height = 'auto';
-  promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px';
-});
+tempS.oninput = () => document.getElementById('tv').textContent = tempS.value;
+maxS.oninput = () => document.getElementById('mv').textContent = maxS.value;
+promptEl.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+promptEl.addEventListener('input', () => { promptEl.style.height='auto'; promptEl.style.height=Math.min(promptEl.scrollHeight,200)+'px'; });
 
 function getModel() { return document.getElementById('model-select').value; }
 
-function addMsg(role, text, model) {
+function badgeFor(modelId) {
+  if (modelId.includes('3.')) return ['3.x', 'badge-3'];
+  if (modelId.includes('pro')) return ['PRO', 'badge-pro'];
+  return ['FLASH', 'badge-flash'];
+}
+
+function addMsg(role, text, modelId) {
   const w = chatEl.querySelector('.welcome'); if (w) w.remove();
   const div = document.createElement('div');
-  div.className = 'message ' + role;
+  div.className = 'msg ' + role;
   const meta = document.createElement('div'); meta.className = 'meta';
   if (role === 'user') { meta.textContent = 'You'; }
   else {
-    const b = document.createElement('span');
-    b.className = 'badge ' + (model.includes('pro') ? 'badge-pro' : 'badge-flash');
-    b.textContent = model.includes('pro') ? 'PRO' : 'FLASH';
+    const [label, cls] = badgeFor(modelId);
+    const b = document.createElement('span'); b.className = 'badge ' + cls; b.textContent = label;
     meta.appendChild(b);
-    meta.appendChild(document.createTextNode(' Gemini'));
+    const name = MODELS[modelId]?.name || modelId;
+    meta.appendChild(document.createTextNode(' ' + name));
   }
-  const c = document.createElement('div'); c.className = 'content'; c.textContent = text;
-  div.appendChild(meta); div.appendChild(c);
+  const body = document.createElement('div'); body.className = 'body';
+  if (role === 'user') body.textContent = text;
+  else body.innerHTML = renderMd(text);
+  div.appendChild(meta); div.appendChild(body);
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
-  return c;
+  return body;
+}
+
+function renderMd(text) {
+  if (!text) return '';
+  try { return marked.parse(text); } catch { return text; }
 }
 
 function updateStats() {
-  const p = PRICING[getModel()] || PRICING['gemini-2.5-flash'];
-  const cost = (totalPT * p.input + totalCT * p.output) / 1e6;
-  document.getElementById('session-stats').textContent =
-    `Tokens: ${totalPT.toLocaleString()} prompt / ${totalCT.toLocaleString()} completion`;
-  document.getElementById('session-cost').textContent = `Estimated cost: $${cost.toFixed(4)}`;
+  const m = MODELS[getModel()];
+  const c = m ? (totIn * m.input_price + totOut * m.output_price) / 1e6 : 0;
+  document.getElementById('stats').textContent = `Tokens: ${totIn.toLocaleString()} in / ${totOut.toLocaleString()} out`;
+  document.getElementById('cost').textContent = `$${c.toFixed(4)}`;
 }
 
 function newChat() {
-  messages = []; totalPT = 0; totalCT = 0; updateStats();
-  chatEl.innerHTML = '<div class="welcome"><h2>Ready to go</h2><p>Pick a model and type your prompt below.</p></div>';
+  messages = []; totIn = 0; totOut = 0; updateStats();
+  chatEl.innerHTML = '<div class="welcome"><h2>Ready</h2><p>Pick a model and send a prompt.</p></div>';
 }
 
 async function send() {
   const text = promptEl.value.trim();
-  if (!text || !saKey) return;
+  if (!text || !user) return;
   messages.push({ role: 'user', parts: [{ text }] });
   addMsg('user', text);
   promptEl.value = ''; promptEl.style.height = 'auto';
   sendBtn.disabled = true;
 
-  const model = getModel();
-  const contentEl = addMsg('model', '', model);
-  const msgDiv = contentEl.parentElement;
+  const modelId = getModel();
+  const bodyEl = addMsg('model', '', modelId);
+  const msgDiv = bodyEl.parentElement;
 
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        serviceAccountKey: saKey,
-        projectId, location: region, model, messages,
-        temperature: parseFloat(tempSlider.value),
-        maxTokens: parseInt(maxTokSlider.value),
+        email: user.email,
+        model: modelId,
+        location: document.getElementById('region-select').value,
+        messages,
+        temperature: parseFloat(tempS.value),
+        maxTokens: parseInt(maxS.value),
+        googleSearch: document.getElementById('search-toggle').checked,
       }),
     });
 
     if (!resp.ok) {
       let errMsg = resp.statusText;
       try { errMsg = (await resp.json()).error || errMsg; } catch {}
-      contentEl.textContent = 'Error: ' + errMsg;
+      bodyEl.textContent = 'Error: ' + errMsg;
       messages.pop(); sendBtn.disabled = false; return;
     }
 
     const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let fullText = '', buffer = '', usageMeta = null;
+    const dec = new TextDecoder();
+    let full = '', buf = '', usage = null, groundingSources = [];
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const d = line.slice(6).trim();
         if (!d || d === '[DONE]') continue;
         try {
           const chunk = JSON.parse(d);
-          if (chunk.error) {
-            contentEl.textContent = 'Error: ' + chunk.error;
-            messages.pop(); sendBtn.disabled = false; return;
-          }
+          if (chunk.error) { bodyEl.textContent = 'Error: ' + chunk.error; messages.pop(); sendBtn.disabled = false; return; }
           const parts = chunk.candidates?.[0]?.content?.parts;
-          if (parts) for (const p of parts) {
-            if (p.text) { fullText += p.text; contentEl.textContent = fullText; chatEl.scrollTop = chatEl.scrollHeight; }
+          if (parts) for (const p of parts) { if (p.text) { full += p.text; bodyEl.textContent = full; chatEl.scrollTop = chatEl.scrollHeight; } }
+          if (chunk.usageMetadata) usage = chunk.usageMetadata;
+          // Collect grounding sources
+          const gm = chunk.candidates?.[0]?.groundingMetadata;
+          if (gm?.groundingChunks) {
+            for (const gc of gm.groundingChunks) {
+              if (gc.web) groundingSources.push(gc.web);
+            }
           }
-          if (chunk.usageMetadata) usageMeta = chunk.usageMetadata;
         } catch {}
       }
     }
 
-    if (!fullText) {
-      contentEl.textContent = 'Error: Empty response from Vertex AI';
-      messages.pop(); sendBtn.disabled = false; return;
+    if (!full) { bodyEl.textContent = 'Error: Empty response'; messages.pop(); sendBtn.disabled = false; return; }
+
+    // Render final markdown
+    bodyEl.innerHTML = renderMd(full);
+
+    messages.push({ role: 'model', parts: [{ text: full }] });
+
+    // Show grounding sources
+    if (groundingSources.length > 0) {
+      const srcDiv = document.createElement('div'); srcDiv.className = 'sources';
+      const unique = [...new Map(groundingSources.map(s => [s.uri, s])).values()];
+      srcDiv.innerHTML = 'Sources: ' + unique.map(s =>
+        `<a href="${s.uri}" target="_blank">${s.title || s.domain || s.uri}</a>`
+      ).join('');
+      msgDiv.appendChild(srcDiv);
     }
 
-    messages.push({ role: 'model', parts: [{ text: fullText }] });
-
-    if (usageMeta) {
-      const pt = usageMeta.promptTokenCount || 0;
-      const ct = usageMeta.candidatesTokenCount || 0;
-      const tt = usageMeta.totalTokenCount || 0;
-      totalPT += pt; totalCT += ct;
+    if (usage) {
+      const pi = usage.promptTokenCount || 0, co = usage.candidatesTokenCount || 0, tt = usage.totalTokenCount || 0;
+      totIn += pi; totOut += co;
       const u = document.createElement('div'); u.className = 'usage';
-      u.textContent = `${pt.toLocaleString()} prompt + ${ct.toLocaleString()} completion = ${tt.toLocaleString()} total tokens`;
+      u.textContent = `${pi.toLocaleString()} in + ${co.toLocaleString()} out = ${tt.toLocaleString()} total`;
       msgDiv.appendChild(u); updateStats();
     }
-  } catch (e) {
-    contentEl.textContent = 'Error: ' + e.message;
-    messages.pop();
-  }
+  } catch (e) { bodyEl.textContent = 'Error: ' + e.message; messages.pop(); }
   sendBtn.disabled = false; promptEl.focus();
 }
 </script>

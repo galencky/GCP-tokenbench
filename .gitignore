@@ -6,3 +6,5 @@ venv/
 api_key.json
 *-key.json
 *-credentials.json
+local_data/
+tokenbench.ipynb

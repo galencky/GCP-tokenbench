@@ -1,2 +1,4 @@
 flask>=3.0
+google-auth>=2.0
 google-cloud-aiplatform>=1.60
+requests>=2.31

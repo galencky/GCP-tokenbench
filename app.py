@@ -1,17 +1,115 @@
 import json
 import os
-from flask import Flask, render_template, request, Response, stream_with_context
+import hashlib
+import time
+from pathlib import Path
+
+from flask import Flask, render_template, request, Response, stream_with_context, jsonify, session
 from google.oauth2 import service_account
 import google.auth.transport.requests
+import requests as req_lib
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET", "dev-secret-change-in-prod")
 
-VERTEX_AI_URL = "https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{location}/publishers/google/models/{model}:streamGenerateContent"
+# Local storage directory
+DATA_DIR = Path(os.environ.get("DATA_DIR", "local_data"))
+DATA_DIR.mkdir(exist_ok=True)
+(DATA_DIR / "users").mkdir(exist_ok=True)
+(DATA_DIR / "keys").mkdir(exist_ok=True)
 
-MODEL_IDS = {
-    "gemini-2.5-pro": "gemini-2.5-pro",
-    "gemini-2.5-flash": "gemini-2.5-flash",
+# ── Models ──
+MODELS = {
+    "gemini-3.1-pro-preview": {
+        "name": "Gemini 3.1 Pro (Preview)",
+        "input_price": 2.00,
+        "output_price": 12.00,
+        "context": 1048576,
+        "category": "Best reasoning",
+        "global": True,
+    },
+    "gemini-3-flash-preview": {
+        "name": "Gemini 3 Flash (Preview)",
+        "input_price": 0.50,
+        "output_price": 3.00,
+        "context": 1048576,
+        "category": "Fast + smart",
+        "global": True,
+    },
+    "gemini-3.1-flash-lite-preview": {
+        "name": "Gemini 3.1 Flash Lite (Preview)",
+        "input_price": 0.25,
+        "output_price": 1.50,
+        "context": 1048576,
+        "category": "Cheapest 3.x",
+        "global": True,
+    },
+    "gemini-2.5-pro": {
+        "name": "Gemini 2.5 Pro",
+        "input_price": 1.25,
+        "output_price": 10.00,
+        "context": 1048576,
+        "category": "Stable reasoning",
+        "global": False,
+    },
+    "gemini-2.5-flash": {
+        "name": "Gemini 2.5 Flash",
+        "input_price": 0.30,
+        "output_price": 2.50,
+        "context": 1048576,
+        "category": "Best value",
+        "global": False,
+    },
+    "gemini-2.5-flash-lite": {
+        "name": "Gemini 2.5 Flash Lite",
+        "input_price": 0.10,
+        "output_price": 0.40,
+        "context": 1048576,
+        "category": "Cheapest",
+        "global": False,
+    },
 }
+
+REGIONAL_URL = "https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{location}/publishers/google/models/{model}:streamGenerateContent"
+GLOBAL_URL = "https://aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/global/publishers/google/models/{model}:streamGenerateContent"
+
+
+def user_dir(email):
+    """Get user-specific directory using hashed email."""
+    h = hashlib.sha256(email.encode()).hexdigest()[:16]
+    d = DATA_DIR / "users" / h
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def save_user_sa_key(email, key_data):
+    """Save service account key for a user."""
+    d = user_dir(email)
+    with open(d / "sa_key.json", "w") as f:
+        json.dump(key_data, f)
+    # Save project ID separately for quick access
+    with open(d / "config.json", "w") as f:
+        json.dump({
+            "project_id": key_data.get("project_id", ""),
+            "client_email": key_data.get("client_email", ""),
+            "updated_at": time.time(),
+        }, f)
+
+
+def load_user_sa_key(email):
+    """Load service account key for a user."""
+    d = user_dir(email)
+    key_path = d / "sa_key.json"
+    config_path = d / "config.json"
+    if key_path.exists():
+        with open(key_path) as f:
+            key = json.load(f)
+        config = {}
+        if config_path.exists():
+            with open(config_path) as f:
+                config = json.load(f)
+        return key, config
+    return None, None
 
 
 def get_access_token(sa_key_data):
@@ -24,50 +122,98 @@ def get_access_token(sa_key_data):
     return credentials.token
 
 
+# ── Routes ──
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", models=MODELS)
+
+
+@app.route("/api/models")
+def get_models():
+    return jsonify(MODELS)
+
+
+@app.route("/api/save-key", methods=["POST"])
+def save_key():
+    data = request.json
+    email = data.get("email", "").strip()
+    sa_key_raw = data.get("serviceAccountKey", "")
+
+    if not email or not sa_key_raw:
+        return jsonify({"error": "Missing email or key"}), 400
+
+    try:
+        sa_key = json.loads(sa_key_raw) if isinstance(sa_key_raw, str) else sa_key_raw
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON key"}), 400
+
+    # Verify the key works
+    try:
+        get_access_token(sa_key)
+    except Exception as e:
+        return jsonify({"error": f"Key validation failed: {e}"}), 400
+
+    save_user_sa_key(email, sa_key)
+    return jsonify({
+        "ok": True,
+        "project_id": sa_key.get("project_id", ""),
+        "client_email": sa_key.get("client_email", ""),
+    })
+
+
+@app.route("/api/check-key", methods=["POST"])
+def check_key():
+    data = request.json
+    email = data.get("email", "").strip()
+    if not email:
+        return jsonify({"has_key": False})
+
+    _, config = load_user_sa_key(email)
+    if config:
+        return jsonify({
+            "has_key": True,
+            "project_id": config.get("project_id", ""),
+            "client_email": config.get("client_email", ""),
+        })
+    return jsonify({"has_key": False})
 
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.json
-    sa_key_raw = data.get("serviceAccountKey", "")
-    project_id = data.get("projectId", "").strip()
-    location = data.get("location", "us-central1").strip()
-    model_key = data.get("model", "gemini-2.5-flash")
+    email = data.get("email", "").strip()
+    model_id = data.get("model", "gemini-2.5-flash")
+    location = data.get("location", "us-central1")
     messages = data.get("messages", [])
     temperature = data.get("temperature", 1.0)
     max_tokens = data.get("maxTokens", 8192)
+    use_search = data.get("googleSearch", False)
 
-    if not sa_key_raw or not project_id:
-        return {"error": "Missing service account key or project ID"}, 400
+    if not email:
+        return jsonify({"error": "Not authenticated"}), 401
 
-    model_id = MODEL_IDS.get(model_key)
-    if not model_id:
-        return {"error": f"Unknown model: {model_key}"}, 400
+    if model_id not in MODELS:
+        return jsonify({"error": f"Unknown model: {model_id}"}), 400
 
     if not messages:
-        return {"error": "No messages provided"}, 400
+        return jsonify({"error": "No messages"}), 400
 
-    # Parse service account key
-    try:
-        sa_key_data = json.loads(sa_key_raw) if isinstance(sa_key_raw, str) else sa_key_raw
-    except json.JSONDecodeError:
-        return {"error": "Invalid service account JSON key"}, 400
+    sa_key, _ = load_user_sa_key(email)
+    if not sa_key:
+        return jsonify({"error": "No service account key found. Please upload one."}), 400
 
-    # Get access token
     try:
-        access_token = get_access_token(sa_key_data)
+        access_token = get_access_token(sa_key)
     except Exception as e:
-        return {"error": f"Auth failed: {e}"}, 401
+        return jsonify({"error": f"Auth failed: {e}"}), 401
 
-    # Build Vertex AI request
-    url = VERTEX_AI_URL.format(
-        location=location,
-        project_id=project_id,
-        model=model_id,
-    )
+    project_id = sa_key.get("project_id", "")
+    model_info = MODELS[model_id]
+    if model_info.get("global"):
+        url = GLOBAL_URL.format(project_id=project_id, model=model_id)
+    else:
+        url = REGIONAL_URL.format(location=location, project_id=project_id, model=model_id)
 
     body = {
         "contents": messages,
@@ -77,8 +223,12 @@ def chat():
         },
     }
 
+    if use_search:
+        body["tools"] = [{"googleSearch": {}}]
+
     def generate():
-        import requests as req_lib
+        print(f"[chat] URL: {url}")
+        print(f"[chat] Model: {model_id}, Search: {use_search}")
 
         resp = req_lib.post(
             url,
@@ -90,81 +240,41 @@ def chat():
             stream=True,
         )
 
+        print(f"[chat] Status: {resp.status_code}")
+
         if not resp.ok:
-            error_text = resp.text
             try:
-                error_msg = resp.json().get("error", {}).get("message", error_text)
+                error_msg = resp.json().get("error", {}).get("message", resp.text)
             except Exception:
-                error_msg = error_text
+                error_msg = resp.text
             yield f"data: {json.dumps({'error': error_msg})}\n\n"
             return
 
-        # Vertex AI streams a JSON array: [{...},\n,{...},\n...]
-        # We parse each complete JSON object and forward as SSE
-        buffer = ""
-        for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
-            buffer += chunk
+        # Collect full response then parse as JSON array
+        raw = resp.text
+        print(f"[chat] Response length: {len(raw)}")
 
-            # Try to extract complete JSON objects from the buffer
-            # Strip array brackets and commas between objects
-            while buffer:
-                buffer = buffer.lstrip(" ,[\n\r")
-                if not buffer or buffer[0] != "{":
-                    # Check if we're at the end (just ] left)
-                    stripped = buffer.strip(" \n\r]")
-                    if not stripped:
-                        buffer = ""
-                        break
-                    break
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            print(f"[chat] Failed to parse response: {raw[:500]}")
+            yield f"data: {json.dumps({'error': 'Failed to parse API response'})}\n\n"
+            return
 
-                # Find matching closing brace
-                depth = 0
-                i = 0
-                in_string = False
-                escape = False
-                for i, ch in enumerate(buffer):
-                    if escape:
-                        escape = False
-                        continue
-                    if ch == "\\":
-                        escape = True
-                        continue
-                    if ch == '"':
-                        in_string = not in_string
-                        continue
-                    if in_string:
-                        continue
-                    if ch == "{":
-                        depth += 1
-                    elif ch == "}":
-                        depth -= 1
-                        if depth == 0:
-                            break
-
-                if depth != 0:
-                    # Incomplete JSON object, wait for more data
-                    break
-
-                obj_str = buffer[: i + 1]
-                buffer = buffer[i + 1 :]
-
-                try:
-                    obj = json.loads(obj_str)
-                    yield f"data: {json.dumps(obj)}\n\n"
-                except json.JSONDecodeError:
-                    pass
+        # Vertex AI returns a JSON array of chunks
+        chunks = data if isinstance(data, list) else [data]
+        for chunk in chunks:
+            yield f"data: {json.dumps(chunk)}\n\n"
 
         yield "data: [DONE]\n\n"
 
     return Response(
         stream_with_context(generate()),
         content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    print(f"\n  Data stored in: {DATA_DIR.resolve()}")
+    app.run(debug=False, host="127.0.0.1", port=5000)
