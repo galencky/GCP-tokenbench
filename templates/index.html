@@ -148,6 +148,10 @@ body{font-family:'Google Sans',system-ui,-apple-system,sans-serif;background:var
 .mf{display:flex;gap:16px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .mu{font-size:11px;color:var(--dim2);background:var(--surface2);padding:4px 10px;border-radius:8px}
 .ms{font-size:12px}.ms a{color:var(--accent);margin-right:10px;text-decoration:none}.ms a:hover{text-decoration:underline}
+.copy-btns{display:flex;gap:4px}
+.copy-btn{background:var(--surface2);border:1px solid var(--border);color:var(--dim);padding:3px 10px;border-radius:6px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px;transition:.15s;font-family:inherit}
+.copy-btn:hover{background:var(--hover);color:var(--text);border-color:var(--dim2)}
+.copy-btn.copied{background:var(--accent-light);color:var(--accent);border-color:var(--accent)}
 .thk{display:flex;align-items:center;gap:10px;padding:10px 0;color:var(--dim);font-size:14px}
 .td{display:flex;gap:5px}
 .td span{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.4s infinite}
@@ -185,14 +189,28 @@ body{font-family:'Google Sans',system-ui,-apple-system,sans-serif;background:var
 .attach-thumb .rm{cursor:pointer;color:var(--danger);font-size:14px;margin-left:4px;opacity:.6}
 .attach-thumb .rm:hover{opacity:1}
 
+/* media output */
+.media-wrap{margin:10px 0;display:flex;flex-direction:column;gap:6px}
+.media-wrap img{max-width:100%;border-radius:12px;cursor:pointer}
+.media-wrap audio{width:100%}
+.media-dl{display:inline-flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);color:var(--dim);padding:5px 12px;border-radius:8px;font-size:12px;cursor:pointer;text-decoration:none;width:fit-content;transition:.15s;font-family:inherit}
+.media-dl:hover{background:var(--hover);color:var(--text);border-color:var(--dim2)}
+.media-dl svg{width:14px;height:14px}
+.gen-status{display:flex;align-items:center;gap:10px;padding:12px 16px;margin:8px 0;background:var(--surface2);border-radius:12px;color:var(--dim);font-size:13px}
+.gen-status .spin{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 /* toggle switch */
-.tog{position:relative;display:inline-flex;align-items:center;cursor:pointer;gap:8px;font-size:13px;color:var(--text);user-select:none}
+.tog{position:relative;display:inline-flex;align-items:center;cursor:pointer;gap:8px;font-size:13px;color:var(--text);user-select:none;transition:opacity .25s}
 .tog input{display:none}
-.tog .slider{width:36px;height:20px;background:var(--border);border-radius:10px;position:relative;transition:.2s;flex-shrink:0}
-.tog .slider::after{content:'';position:absolute;width:16px;height:16px;background:#fff;border-radius:50%;top:2px;left:2px;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.tog .slider{width:36px;height:20px;background:var(--border);border-radius:10px;position:relative;transition:background .25s ease;flex-shrink:0}
+.tog .slider::after{content:'';position:absolute;width:16px;height:16px;background:#fff;border-radius:50%;top:2px;left:2px;transition:left .25s ease, transform .15s ease, box-shadow .25s ease;box-shadow:0 1px 2px rgba(0,0,0,.2)}
 .tog input:checked+.slider{background:var(--accent)}
 .tog input:checked+.slider::after{left:18px}
-.tog .lbl{font-weight:500}
+.tog:active .slider::after{transform:scaleX(1.15)}
+.tog .lbl{font-weight:500;transition:color .25s}
+.tog.off{opacity:.4;pointer-events:none}
+.tog.off .lbl{color:var(--dim2)}
 </style>
 </head>
 <body>
@@ -203,7 +221,7 @@ body{font-family:'Google Sans',system-ui,-apple-system,sans-serif;background:var
     <h1><span>Gemini</span> Token Bench</h1>
     <p>Run prompts against Gemini models using your GCP $300 free credit.</p>
     <div id="g-btn" style="display:inline-block;margin-bottom:16px"></div><br>
-    <span class="db" id="dev-bypass">Continue without sign-in (local dev)</span>
+    <button class="btn" id="dev-bypass" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);margin-top:8px">Continue without sign-in</button>
   </div>
 </div>
 
@@ -242,18 +260,39 @@ body{font-family:'Google Sans',system-ui,-apple-system,sans-serif;background:var
     <button class="ham" onclick="openSidebar()">&#9776;</button>
     <select id="model-sel" onchange="updateMI()">
       <optgroup label="Gemini 3.x (Preview)">
-        {% for id, m in models.items() if m.get('global') %}<option value="{{ id }}">{{ m.name }}</option>{% endfor %}
+        {% for id, m in models.items() if m.get('global') and not m.get('group') %}<option value="{{ id }}">{{ m.name }}</option>{% endfor %}
       </optgroup>
       <optgroup label="Gemini 2.5 (Stable)">
-        {% for id, m in models.items() if not m.get('global') %}<option value="{{ id }}">{{ m.name }}</option>{% endfor %}
+        {% for id, m in models.items() if not m.get('global') and not m.get('group') %}<option value="{{ id }}">{{ m.name }}</option>{% endfor %}
+      </optgroup>
+      <optgroup label="Image Generation">
+        {% for id, m in models.items() if m.get('group') == 'image' %}<option value="{{ id }}">{{ m.name }}</option>{% endfor %}
+      </optgroup>
+      <optgroup label="Text-to-Speech">
+        {% for id, m in models.items() if m.get('group') == 'tts' %}<option value="{{ id }}">{{ m.name }}</option>{% endfor %}
       </optgroup>
     </select>
     <span class="mi" id="mi"></span>
     <div style="flex:1"></div>
     <label class="tog">
-      <input type="checkbox" id="gs-tog" checked>
+      <input type="checkbox" id="gs-tog" checked onchange="onToggleChange('gs')">
       <span class="slider"></span>
       <span class="lbl">Search</span>
+    </label>
+    <label class="tog">
+      <input type="checkbox" id="code-tog" onchange="onToggleChange('code')">
+      <span class="slider"></span>
+      <span class="lbl">Code Exec</span>
+    </label>
+    <label class="tog">
+      <input type="checkbox" id="img-tog" onchange="onToggleChange('img')">
+      <span class="slider"></span>
+      <span class="lbl">Image Gen</span>
+    </label>
+    <label class="tog">
+      <input type="checkbox" id="tts-tog" onchange="onToggleChange('tts')">
+      <span class="slider"></span>
+      <span class="lbl">TTS</span>
     </label>
     <select id="reg-sel" style="font-size:11px">
       <option value="us-central1">us-central1</option><option value="us-east4">us-east4</option><option value="us-west1">us-west1</option><option value="europe-west1">europe-west1</option><option value="asia-southeast1">asia-southeast1</option>
@@ -335,6 +374,35 @@ body{font-family:'Google Sans',system-ui,-apple-system,sans-serif;background:var
         <input type="number" id="s-think-budget" min="0" max="65536" placeholder="8192">
       </div>
 
+      <div class="section-title">TTS / Voice</div>
+      <div class="sf">
+        <label>Voice <span class="hint">(for TTS mode)</span></label>
+        <select id="s-voice">
+          <option value="Kore">Kore</option><option value="Puck">Puck</option>
+          <option value="Charon">Charon</option><option value="Fenrir">Fenrir</option>
+          <option value="Leda">Leda</option><option value="Orus">Orus</option>
+          <option value="Zephyr">Zephyr</option><option value="Aoede">Aoede</option>
+          <option value="Achernar">Achernar</option><option value="Algenib">Algenib</option>
+          <option value="Schedar">Schedar</option><option value="Gacrux">Gacrux</option>
+          <option value="Sulafat">Sulafat</option><option value="Despina">Despina</option>
+        </select>
+      </div>
+
+      <div class="section-title">Audio / Media</div>
+      <div class="sf">
+        <label class="tog">
+          <input type="checkbox" id="s-audio-ts">
+          <span class="slider"></span>
+          <span class="lbl">Audio timestamps</span>
+        </label>
+      </div>
+
+      <div class="section-title">JSON / Schema</div>
+      <div class="sf" style="grid-column:1/-1">
+        <label>Response Schema <span class="hint">(JSON, for structured output)</span></label>
+        <textarea id="s-schema" placeholder='{"type":"object","properties":{"answer":{"type":"string"}}}' style="min-height:60px;width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:12px;font-family:'Google Sans Mono',monospace;resize:vertical"></textarea>
+      </div>
+
       <div class="section-title">System Instruction</div>
       <div class="sf" style="grid-column:1/-1">
         <textarea id="sys-prompt" placeholder="You are a helpful assistant..." style="min-height:80px;width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
@@ -351,7 +419,7 @@ body{font-family:'Google Sans',system-ui,-apple-system,sans-serif;background:var
 
   <!-- Input -->
   <div id="ib">
-    <input type="file" id="file-input" multiple accept="image/*,audio/*" style="display:none" onchange="handleAttach(this.files)">
+    <input type="file" id="file-input" multiple accept="image/*,audio/*,video/*,application/pdf" style="display:none" onchange="handleAttach(this.files)">
     <div class="attach-row" id="attach-row" style="display:none">
       <div class="attach-preview" id="attach-preview"></div>
     </div>
@@ -390,7 +458,13 @@ let messages=[], totIn=0, totOut=0;
 let currentChatId=null, chatList=[];
 
 // ── Auth ──
-function onGsiLoad(){if(!window.google?.accounts?.id){setTimeout(onGsiLoad,200);return}try{google.accounts.id.initialize({client_id:'{{config.get("GOOGLE_CLIENT_ID","")}}',callback:onGL});google.accounts.id.renderButton(document.getElementById('g-btn'),{type:'standard',theme:'filled_black',size:'large',text:'signin_with'})}catch(e){}}
+let _gsiRetry=0;
+function onGsiLoad(){
+  const cid='{{config.get("GOOGLE_CLIENT_ID","")}}';
+  if(!cid){document.getElementById('g-btn').style.display='none';return}
+  if(!window.google?.accounts?.id){if(++_gsiRetry<15)setTimeout(onGsiLoad,200);return}
+  try{google.accounts.id.initialize({client_id:cid,callback:onGL});google.accounts.id.renderButton(document.getElementById('g-btn'),{type:'standard',theme:'filled_black',size:'large',text:'signin_with'})}catch(e){document.getElementById('g-btn').style.display='none'}
+}
 window.addEventListener('load',onGsiLoad);
 function onGL(r){const p=parseJwt(r.credential);user={name:p.name,email:p.email,picture:p.picture};localStorage.setItem('tb-user',JSON.stringify(user));afterLogin()}
 function parseJwt(t){const b=t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');return JSON.parse(decodeURIComponent(atob(b).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join('')))}
@@ -429,7 +503,97 @@ function toggleSettings(){
   const p=document.getElementById('settings-panel'),b=document.getElementById('settings-toggle');
   p.classList.toggle('open');b.classList.toggle('open');
 }
-function updateMI(){const m=MODELS[document.getElementById('model-sel').value];if(!m)return;document.getElementById('mi').innerHTML=`<span class="pr">$${m.input_price}/M in · $${m.output_price}/M out</span> · ${(m.context/1e6).toFixed(1)}M ctx · ${m.category}`}
+function updateMI(){
+  const sel=document.getElementById('model-sel');
+  const mid=sel.value;
+  const m=MODELS[mid];if(!m)return;
+  document.getElementById('mi').innerHTML=`<span class="pr">$${m.input_price}/M in · $${m.output_price}/M out</span> · ${(m.context/1e6).toFixed(1)}M ctx · ${m.category}`;
+  syncTogglesForModel(mid);
+}
+
+function setToggle(el, checked, disabled){
+  const changed = el.checked !== checked;
+  el.checked = checked;
+  el.disabled = !!disabled;
+  el.closest('.tog').classList.toggle('off', !!disabled);
+  // Pulse animation on change
+  if(changed){
+    const slider = el.nextElementSibling;
+    slider.style.transition='none';
+    void slider.offsetHeight; // force reflow
+    slider.style.transition='';
+  }
+}
+
+function syncTogglesForModel(mid){
+  const m=MODELS[mid];if(!m)return;
+  const group=m.group||'chat';
+  const gs=document.getElementById('gs-tog');
+  const code=document.getElementById('code-tog');
+  const img=document.getElementById('img-tog');
+  const tts=document.getElementById('tts-tog');
+
+  if(group==='tts'){
+    setToggle(tts, true, false);
+    setToggle(img, false, true);
+    setToggle(gs, false, true);
+    setToggle(code, false, true);
+  } else if(group==='image'){
+    setToggle(img, true, false);
+    setToggle(tts, false, true);
+    setToggle(gs, false, true);
+    setToggle(code, false, true);
+  } else {
+    setToggle(tts, false, false);
+    setToggle(img, false, false);
+    // Keep search/code state but re-enable
+    gs.disabled=false; gs.closest('.tog').classList.remove('off');
+    code.disabled=false; code.closest('.tog').classList.remove('off');
+  }
+}
+
+function onToggleChange(which){
+  const sel=document.getElementById('model-sel');
+  const gs=document.getElementById('gs-tog');
+  const code=document.getElementById('code-tog');
+  const img=document.getElementById('img-tog');
+  const tts=document.getElementById('tts-tog');
+
+  if(which==='tts' && tts.checked){
+    setToggle(img, false, true);
+    setToggle(gs, false, true);
+    setToggle(code, false, true);
+    const cur=MODELS[sel.value];
+    if(!cur||cur.group!=='tts'){
+      for(const opt of sel.options){if(MODELS[opt.value]?.group==='tts'){sel.value=opt.value;break}}
+    }
+  } else if(which==='img' && img.checked){
+    setToggle(tts, false, true);
+    setToggle(gs, false, true);
+    setToggle(code, false, true);
+    const cur=MODELS[sel.value];
+    if(!cur||cur.group!=='image'){
+      for(const opt of sel.options){if(MODELS[opt.value]?.group==='image'){sel.value=opt.value;break}}
+    }
+  } else {
+    // Re-enable all
+    [gs,code,img,tts].forEach(t=>{t.disabled=false;t.closest('.tog').classList.remove('off')});
+    if(which==='tts' && !tts.checked){
+      const cur=MODELS[sel.value];
+      if(cur?.group==='tts'){sel.value='gemini-2.5-flash'}
+    }
+    if(which==='img' && !img.checked){
+      const cur=MODELS[sel.value];
+      if(cur?.group==='image'){sel.value='gemini-2.5-flash'}
+    }
+  }
+  updateMI_info();
+}
+
+function updateMI_info(){
+  const m=MODELS[document.getElementById('model-sel').value];if(!m)return;
+  document.getElementById('mi').innerHTML=`<span class="pr">$${m.input_price}/M in · $${m.output_price}/M out</span> · ${(m.context/1e6).toFixed(1)}M ctx · ${m.category}`;
+}
 
 // ── Chat History ──
 async function loadChatList(){
@@ -459,7 +623,13 @@ async function loadChat(id){
     if(s.seed!=null)document.getElementById('s-seed').value=s.seed;
     if(s.stopSequences)document.getElementById('s-stop').value=s.stopSequences;
     if(s.responseMimeType)document.getElementById('s-mime').value=s.responseMimeType;
-    document.getElementById('gs-tog').checked=!!s.googleSearch;
+    document.getElementById('gs-tog').checked=s.googleSearch!==false;
+    document.getElementById('code-tog').checked=!!s.codeExecution;
+    document.getElementById('img-tog').checked=!!s.imageGen;
+    document.getElementById('tts-tog').checked=!!s.ttsMode;
+    if(s.ttsVoice)document.getElementById('s-voice').value=s.ttsVoice;
+    document.getElementById('s-audio-ts').checked=!!s.audioTimestamp;
+    if(s.responseSchema)document.getElementById('s-schema').value=typeof s.responseSchema==='string'?s.responseSchema:JSON.stringify(s.responseSchema,null,2);
   }
   if(d.model)document.getElementById('model-sel').value=d.model;
   if(d.systemPrompt)document.getElementById('sys-prompt').value=d.systemPrompt;
@@ -469,8 +639,20 @@ async function loadChat(id){
   for(let i=0;i<messages.length;i++){
     const m=messages[i];
     const txt=m.parts.map(p=>p.text||'').join('');
-    const {body}=addMsg(m.role==='user'?'user':'model',txt,d.model||'gemini-2.5-flash');
-    if(m.role!=='user')body.innerHTML=renderMd(txt);
+    const {body,mc}=addMsg(m.role==='user'?'user':'model',txt,d.model||'gemini-2.5-flash');
+    if(m.role!=='user'){
+      body.innerHTML=renderMd(txt);
+      // Add copy buttons for model messages
+      if(txt){
+        const f=document.createElement('div');f.className='mf';
+        f.appendChild(makeCopyBtns(txt));
+        mc.appendChild(f);
+      }
+    }
+    // Load saved media
+    if(m._mediaRefs&&m._mediaRefs.length){
+      loadSavedMedia(body,m._mediaRefs);
+    }
   }
   renderChatList();
 }
@@ -516,6 +698,13 @@ function getSettings(){
   const mime=document.getElementById('s-mime').value;if(mime!=='text/plain')s.responseMimeType=mime;
   const logp=getVal('s-logp');if(logp!=null)s.logprobs=parseInt(logp);
   s.googleSearch=document.getElementById('gs-tog').checked;
+  s.codeExecution=document.getElementById('code-tog').checked;
+  s.imageGen=document.getElementById('img-tog').checked;
+  s.ttsMode=document.getElementById('tts-tog').checked;
+  s.ttsVoice=document.getElementById('s-voice').value;
+  s.audioTimestamp=document.getElementById('s-audio-ts').checked;
+  const schema=document.getElementById('s-schema').value.trim();
+  if(schema)s.responseSchema=schema;
   if(document.getElementById('s-think-on').checked){
     const budget=getVal('s-think-budget');
     s.thinkingConfig={thinkingBudget:budget?parseInt(budget):8192};
@@ -537,6 +726,8 @@ function getGenConfig(){
   if(s.responseMimeType)gc.responseMimeType=s.responseMimeType;
   if(s.logprobs!=null)gc.logprobs=s.logprobs;
   if(s.thinkingConfig)gc.thinkingConfig=s.thinkingConfig;
+  if(s.audioTimestamp)gc.audioTimestamp=true;
+  if(s.responseSchema)gc.responseSchema=s.responseSchema;
   return gc;
 }
 
@@ -550,8 +741,9 @@ let attachments = []; // [{name, mimeType, data (base64)}]
 
 function handleAttach(files){
   for(const f of files){
-    if(!f.type.startsWith('image/')&&!f.type.startsWith('audio/')){alert('Only image and audio files are supported');continue}
-    if(f.size>20*1024*1024){alert('File too large (max 20MB)');continue}
+    const ok=f.type.startsWith('image/')||f.type.startsWith('audio/')||f.type.startsWith('video/')||f.type==='application/pdf';
+    if(!ok){alert('Supported: image, audio, video, PDF');continue}
+    if(f.size>50*1024*1024){alert('File too large (max 50MB)');continue}
     const reader=new FileReader();
     reader.onload=ev=>{
       const base64=ev.target.result.split(',')[1];
@@ -596,6 +788,23 @@ function addMsg(role,text,modelId){
 }
 function renderMd(t){if(!t)return'';try{return marked.parse(t)}catch{return t}}
 
+function makeCopyBtns(rawMarkdown){
+  const div=document.createElement('div');div.className='copy-btns';
+  const btnTxt=document.createElement('button');btnTxt.className='copy-btn';
+  btnTxt.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy text';
+  btnTxt.onclick=()=>{
+    const tmp=document.createElement('div');tmp.innerHTML=renderMd(rawMarkdown);
+    navigator.clipboard.writeText(tmp.textContent||tmp.innerText).then(()=>{btnTxt.classList.add('copied');btnTxt.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Copied!';setTimeout(()=>{btnTxt.classList.remove('copied');btnTxt.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy text'},1500)});
+  };
+  const btnMd=document.createElement('button');btnMd.className='copy-btn';
+  btnMd.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg> Copy markdown';
+  btnMd.onclick=()=>{
+    navigator.clipboard.writeText(rawMarkdown).then(()=>{btnMd.classList.add('copied');btnMd.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Copied!';setTimeout(()=>{btnMd.classList.remove('copied');btnMd.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg> Copy markdown'},1500)});
+  };
+  div.appendChild(btnTxt);div.appendChild(btnMd);
+  return div;
+}
+
 function showThinking(modelId){
   const w=ci.querySelector('.welcome');if(w)w.remove();
   const div=document.createElement('div');div.className='msg model';
@@ -620,6 +829,72 @@ function newChat(){
   currentChatId=null;messages=[];totIn=0;totOut=0;updateStats();
   ci.innerHTML='<div class="welcome"><h2>Hello, <span>how can I help?</span></h2><p>Select a model and send a prompt.</p></div>';
   renderChatList();
+}
+
+const dlIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+
+function makeDownloadBtn(dataUrl, filename){
+  const a=document.createElement('a');a.className='media-dl';
+  a.href=dataUrl;a.download=filename;
+  a.innerHTML=dlIcon+' Download';
+  return a;
+}
+
+function createImageEl(mimeType, b64data){
+  const wrap=document.createElement('div');wrap.className='media-wrap';
+  const src=`data:${mimeType};base64,${b64data}`;
+  const img=document.createElement('img');img.src=src;
+  img.onclick=()=>window.open(src,'_blank');
+  wrap.appendChild(img);
+  wrap.appendChild(makeDownloadBtn(src,'gemini-image.png'));
+  return wrap;
+}
+
+function createAudioEl(mimeType, b64data){
+  const wrap=document.createElement('div');wrap.className='media-wrap';
+  const src=`data:${mimeType};base64,${b64data}`;
+  const audio=document.createElement('audio');audio.controls=true;audio.src=src;
+  const ext=mimeType.includes('wav')?'wav':mimeType.includes('mp3')?'mp3':'audio';
+  wrap.appendChild(audio);
+  wrap.appendChild(makeDownloadBtn(src,`gemini-speech.${ext}`));
+  return wrap;
+}
+
+async function convertPcmAndPlay(pcmData, container){
+  try{
+    const payload=Array.isArray(pcmData)?pcmData:[pcmData];
+    const r=await fetch('/api/pcm-to-wav',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:payload,sampleRate:24000,channels:1,bitsPerSample:16})});
+    const d=await r.json();
+    if(d.data){
+      container.appendChild(createAudioEl(d.mimeType, d.data));
+    }
+  }catch(e){console.error('PCM convert failed:',e)}
+}
+
+function renderMediaInBody(container, mediaList){
+  for(const m of mediaList){
+    if(m.type==='image'){
+      container.appendChild(createImageEl(m.mimeType, m.data));
+    } else if(m.type==='audio'){
+      if(m.mimeType.includes('L16')||m.mimeType.includes('pcm')){
+        convertPcmAndPlay(m.data,container);
+      } else {
+        container.appendChild(createAudioEl(m.mimeType, m.data));
+      }
+    }
+  }
+}
+
+async function loadSavedMedia(container, refs){
+  for(const ref of refs){
+    try{
+      const r=await fetch('/api/chats/load-media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email,mediaId:ref.mediaId})});
+      const d=await r.json();
+      if(d.data){
+        renderMediaInBody(container,[{type:ref.type,mimeType:d.mimeType||ref.mimeType,data:d.data}]);
+      }
+    }catch{}
+  }
 }
 
 async function send(){
@@ -647,6 +922,10 @@ async function send(){
       email:user.email,model:modelId,location:document.getElementById('reg-sel').value,
       messages,generationConfig:getGenConfig(),
       googleSearch:document.getElementById('gs-tog').checked,
+      codeExecution:document.getElementById('code-tog').checked,
+      imageGen:document.getElementById('img-tog').checked,
+      ttsMode:document.getElementById('tts-tog').checked,
+      ttsVoice:document.getElementById('s-voice').value,
       systemInstruction:document.getElementById('sys-prompt').value.trim(),
     })});
 
@@ -655,8 +934,17 @@ async function send(){
     const body=document.createElement('div');body.className='mb';
     tMc.replaceChild(body,thk);
 
+    // Show media generation indicator for image/TTS modes
+    const isImgMode=document.getElementById('img-tog').checked;
+    const isTtsMode=document.getElementById('tts-tog').checked;
+    if(isImgMode||isTtsMode){
+      const gs=document.createElement('div');gs.className='gen-status';gs.id='gen-indicator';
+      gs.innerHTML=`<div class="spin"></div><span>${isImgMode?'Generating image...':'Generating speech...'}</span>`;
+      body.appendChild(gs);
+    }
+
     const reader=resp.body.getReader(),dec=new TextDecoder();
-    let full='',buf='',usage=null,gsrc=[];
+    let full='',buf='',usage=null,gsrc=[],mediaItems=[],pcmChunks=[];
 
     while(true){
       const{done,value}=await reader.read();if(done)break;
@@ -667,9 +955,52 @@ async function send(){
         const d=line.slice(6).trim();if(!d||d==='[DONE]')continue;
         try{
           const chunk=JSON.parse(d);
-          if(chunk.error){body.textContent='Error: '+chunk.error;messages.pop();sendBtn.disabled=false;return}
+          if(chunk.error){const errStr=typeof chunk.error==='object'?JSON.stringify(chunk.error):chunk.error;body.textContent='Error: '+errStr;messages.pop();sendBtn.disabled=false;return}
           const parts=chunk.candidates?.[0]?.content?.parts;
-          if(parts)for(const p of parts){if(p.text){full+=p.text;body.textContent=full;ca.scrollTop=ca.scrollHeight}}
+          if(parts)for(const p of parts){
+            if(p.text){full+=p.text;body.textContent=full;ca.scrollTop=ca.scrollHeight}
+            if(p.inlineData){
+              const gi=body.querySelector('#gen-indicator');if(gi)gi.remove();
+              const d=p.inlineData;
+              if(d.mimeType.startsWith('image/')){
+                body.appendChild(createImageEl(d.mimeType, d.data));
+                full+='[image]';
+                mediaItems.push({type:'image',mimeType:d.mimeType,data:d.data});
+              } else if(d.mimeType.startsWith('audio/')){
+                if(d.mimeType.includes('pcm')||d.mimeType.includes('L16')){
+                  pcmChunks.push(d.data);
+                  if(!body.querySelector('.tts-status')){
+                    const st=document.createElement('div');st.className='tts-status';
+                    st.style.cssText='color:var(--dim);font-size:13px;padding:8px 0';
+                    st.textContent='Generating audio...';
+                    body.appendChild(st);
+                  }
+                } else {
+                  body.appendChild(createAudioEl(d.mimeType, d.data));
+                  mediaItems.push({type:'audio',mimeType:d.mimeType,data:d.data});
+                  full+='[audio]';
+                }
+              }
+              ca.scrollTop=ca.scrollHeight;
+            }
+            if(p.executableCode){
+              const pre=document.createElement('pre');
+              pre.style.cssText='background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin:6px 0;overflow-x:auto';
+              const code=document.createElement('code');
+              code.textContent=p.executableCode.code;
+              pre.appendChild(code);body.appendChild(pre);
+              full+='```\n'+p.executableCode.code+'\n```\n';
+              ca.scrollTop=ca.scrollHeight;
+            }
+            if(p.codeExecutionResult){
+              const out=document.createElement('div');
+              out.style.cssText='background:var(--surface2);border-left:3px solid var(--success);padding:8px 12px;border-radius:0 8px 8px 0;margin:4px 0;font-family:monospace;font-size:13px;white-space:pre-wrap';
+              out.textContent=p.codeExecutionResult.output||'(no output)';
+              body.appendChild(out);
+              full+='\nOutput: '+p.codeExecutionResult.output+'\n';
+              ca.scrollTop=ca.scrollHeight;
+            }
+          }
           if(chunk.usageMetadata)usage=chunk.usageMetadata;
           const gm=chunk.candidates?.[0]?.groundingMetadata;
           if(gm?.groundingChunks)for(const gc of gm.groundingChunks){if(gc.web)gsrc.push(gc.web)}
@@ -677,17 +1008,63 @@ async function send(){
       }
     }
 
+    // Combine PCM chunks into single WAV audio
+    if(pcmChunks.length){
+      const st=body.querySelector('.tts-status');if(st)st.remove();
+      const gi=body.querySelector('#gen-indicator');if(gi)gi.remove();
+      try{
+        const r=await fetch('/api/pcm-to-wav',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:pcmChunks,sampleRate:24000,channels:1,bitsPerSample:16})});
+        const d=await r.json();
+        if(d.data){
+          body.appendChild(createAudioEl(d.mimeType, d.data));
+          mediaItems.push({type:'audio',mimeType:d.mimeType,data:d.data});
+          full+='[audio]';
+        }
+      }catch(e){body.appendChild(document.createTextNode('Audio conversion failed: '+e.message))}
+      ca.scrollTop=ca.scrollHeight;
+    }
+
+    const giFinal=body.querySelector('#gen-indicator');if(giFinal)giFinal.remove();
     if(!full){body.textContent='Error: Empty response';messages.pop();sendBtn.disabled=false;return}
 
-    body.innerHTML=renderMd(full);
+    // Re-render: keep media elements (img, audio, pre from code exec), render text as markdown
+    const mediaEls=body.querySelectorAll('img,audio,pre,div[style*="border-left"]');
+    const textOnly=full.replace(/\[image\]/g,'').replace(/\[audio\]/g,'').trim();
+    if(textOnly){
+      // Build a temp container with markdown, then append media back
+      const tmp=document.createElement('div');
+      tmp.innerHTML=renderMd(textOnly);
+      // Clear and rebuild
+      body.innerHTML='';
+      body.appendChild(tmp);
+      mediaEls.forEach(el=>body.appendChild(el));
+    }
     messages.push({role:'model',parts:[{text:full}]});
 
     const footer=document.createElement('div');footer.className='mf';
+    // Copy buttons
+    if(textOnly)footer.appendChild(makeCopyBtns(textOnly));
     if(gsrc.length){const sd=document.createElement('div');sd.className='ms';const uniq=[...new Map(gsrc.map(s=>[s.uri,s])).values()];sd.innerHTML=uniq.map(s=>`<a href="${s.uri}" target="_blank">${s.title||s.domain||'Source'}</a>`).join('');footer.appendChild(sd)}
     if(usage){const pi=usage.promptTokenCount||0,co=usage.candidatesTokenCount||0,tt=usage.totalTokenCount||0;totIn+=pi;totOut+=co;const u=document.createElement('div');u.className='mu';u.textContent=`${pi.toLocaleString()} in + ${co.toLocaleString()} out = ${tt.toLocaleString()} total`;footer.appendChild(u);updateStats()}
-    if(footer.children.length)tMc.appendChild(footer);
+    tMc.appendChild(footer);
 
     // Auto-save
+    // Save media items to separate storage and keep refs in chat
+    if(mediaItems.length){
+      const mediaRefs=[];
+      for(const m of mediaItems){
+        try{
+          const r=await fetch('/api/chats/save-media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email,data:m.data,mimeType:m.mimeType})});
+          const d=await r.json();
+          if(d.mediaId)mediaRefs.push({type:m.type,mimeType:m.mimeType,mediaId:d.mediaId});
+        }catch{}
+      }
+      // Attach media refs to the last model message in our messages array
+      if(messages.length){
+        const lastMsg=messages[messages.length-1];
+        lastMsg._mediaRefs=mediaRefs;
+      }
+    }
     await saveCurrentChat();
   }catch(e){tDiv.remove();addMsg('model','Error: '+e.message,modelId);messages.pop()}
   sendBtn.disabled=false;pe.focus();

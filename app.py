@@ -3,6 +3,8 @@ import os
 import hashlib
 import time
 import uuid
+import struct
+import base64
 from pathlib import Path
 
 from flask import Flask, render_template, request, Response, stream_with_context, jsonify
@@ -43,6 +45,26 @@ MODELS = {
     "gemini-2.5-flash-lite": {
         "name": "Gemini 2.5 Flash Lite", "input_price": 0.10, "output_price": 0.40,
         "context": 1048576, "category": "Cheapest", "global": False,
+    },
+    "gemini-2.5-flash-preview-tts": {
+        "name": "Gemini 2.5 Flash TTS", "input_price": 0.30, "output_price": 2.50,
+        "context": 32768, "category": "Text-to-Speech", "global": False, "group": "tts",
+    },
+    "gemini-2.5-pro-preview-tts": {
+        "name": "Gemini 2.5 Pro TTS", "input_price": 1.25, "output_price": 10.00,
+        "context": 32768, "category": "Text-to-Speech (HD)", "global": False, "group": "tts",
+    },
+    "gemini-2.5-flash-image": {
+        "name": "Gemini 2.5 Flash Image", "input_price": 0.30, "output_price": 2.50,
+        "context": 1048576, "category": "Image Generation", "global": False, "group": "image",
+    },
+    "gemini-3.1-flash-image-preview": {
+        "name": "Gemini 3.1 Flash Image (Preview)", "input_price": 0.50, "output_price": 3.00,
+        "context": 1048576, "category": "Image Gen (3.x)", "global": True, "group": "image",
+    },
+    "gemini-3-pro-image-preview": {
+        "name": "Gemini 3 Pro Image (Preview)", "input_price": 2.00, "output_price": 12.00,
+        "context": 1048576, "category": "Image Gen (HD)", "global": True, "group": "image",
     },
 }
 
@@ -234,7 +256,18 @@ def chat():
     messages = data.get("messages", [])
     gen_config = data.get("generationConfig", {})
     use_search = data.get("googleSearch", False)
+    use_code_exec = data.get("codeExecution", False)
     system_instruction = data.get("systemInstruction", "")
+    tts_mode = data.get("ttsMode", False)
+    tts_voice = data.get("ttsVoice", "Kore")
+    image_gen = data.get("imageGen", False)
+
+    # Auto-detect mode from model ID if frontend didn't set flags
+    model_group = MODELS.get(model_id, {}).get("group", "chat")
+    if model_group == "tts":
+        tts_mode = True
+    elif model_group == "image":
+        image_gen = True
 
     if not email:
         return jsonify({"error": "Not authenticated"}), 401
@@ -283,13 +316,61 @@ def chat():
     if "thinkingConfig" in gen_config and gen_config["thinkingConfig"]:
         final_config["thinkingConfig"] = gen_config["thinkingConfig"]
 
+    if "responseModalities" in gen_config and gen_config["responseModalities"]:
+        final_config["responseModalities"] = gen_config["responseModalities"]
+
+    if "speechConfig" in gen_config and gen_config["speechConfig"]:
+        final_config["speechConfig"] = gen_config["speechConfig"]
+
+    if "audioTimestamp" in gen_config:
+        final_config["audioTimestamp"] = bool(gen_config["audioTimestamp"])
+
+    if "responseSchema" in gen_config and gen_config["responseSchema"]:
+        try:
+            schema = gen_config["responseSchema"]
+            if isinstance(schema, str):
+                schema = json.loads(schema)
+            final_config["responseSchema"] = schema
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # TTS mode overrides — force TTS model if needed
+    if tts_mode:
+        if "tts" not in model_id:
+            model_id = "gemini-2.5-flash-preview-tts"
+            model_info = MODELS[model_id]
+            url = REGIONAL_URL.format(location=location, project_id=project_id, model=model_id)
+        final_config["responseModalities"] = ["AUDIO"]
+        final_config["speechConfig"] = {
+            "voiceConfig": {
+                "prebuiltVoiceConfig": {"voiceName": tts_voice}
+            }
+        }
+        # TTS doesn't support system instructions
+        system_instruction = ""
+
+    # Image generation mode — force image model if needed
+    if image_gen:
+        if "image" not in model_id:
+            model_id = "gemini-2.5-flash-image"
+            model_info = MODELS[model_id]
+            url = REGIONAL_URL.format(location=location, project_id=project_id, model=model_id)
+        final_config["responseModalities"] = ["TEXT", "IMAGE"]
+
     body = {"contents": messages, "generationConfig": final_config}
 
     if system_instruction:
         body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
-    if use_search:
-        body["tools"] = [{"googleSearch": {}}]
+    # Build tools array — TTS and image gen don't support tools
+    if not tts_mode and not image_gen:
+        tools = []
+        if use_search:
+            tools.append({"googleSearch": {}})
+        if use_code_exec:
+            tools.append({"codeExecution": {}})
+        if tools:
+            body["tools"] = tools
 
     def generate():
         resp = req_lib.post(url, headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}, json=body, stream=True)
@@ -340,6 +421,65 @@ def chat():
         yield "data: [DONE]\n\n"
 
     return Response(stream_with_context(generate()), content_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/pcm-to-wav", methods=["POST"])
+def pcm_to_wav():
+    """Convert raw PCM base64 (single or array of chunks) to WAV base64."""
+    data = request.json
+    pcm_input = data.get("data", "")
+    sample_rate = data.get("sampleRate", 24000)
+    channels = data.get("channels", 1)
+    bits = data.get("bitsPerSample", 16)
+    try:
+        # Handle array of base64 chunks or single string
+        if isinstance(pcm_input, list):
+            pcm = b"".join(base64.b64decode(chunk) for chunk in pcm_input)
+        else:
+            pcm = base64.b64decode(pcm_input)
+        # Build WAV header
+        byte_rate = sample_rate * channels * bits // 8
+        block_align = channels * bits // 8
+        wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
+            b'RIFF', 36 + len(pcm), b'WAVE',
+            b'fmt ', 16, 1, channels, sample_rate, byte_rate, block_align, bits,
+            b'data', len(pcm))
+        wav_b64 = base64.b64encode(wav_header + pcm).decode()
+        return jsonify({"data": wav_b64, "mimeType": "audio/wav"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/chats/save-media", methods=["POST"])
+def save_media():
+    """Save large media separately and return a reference ID."""
+    data = request.json
+    email = data.get("email", "").strip()
+    media_data = data.get("data", "")
+    mime_type = data.get("mimeType", "")
+    if not email or not media_data:
+        return jsonify({"error": "Missing params"}), 400
+    media_id = str(uuid.uuid4())[:12]
+    media_dir = user_dir(email) / "media"
+    media_dir.mkdir(exist_ok=True)
+    with open(media_dir / f"{media_id}.json", "w") as f:
+        json.dump({"data": media_data, "mimeType": mime_type}, f)
+    return jsonify({"ok": True, "mediaId": media_id})
+
+
+@app.route("/api/chats/load-media", methods=["POST"])
+def load_media():
+    """Load saved media by ID."""
+    data = request.json
+    email = data.get("email", "").strip()
+    media_id = data.get("mediaId", "")
+    if not email or not media_id:
+        return jsonify({"error": "Missing params"}), 400
+    path = user_dir(email) / "media" / f"{media_id}.json"
+    if not path.exists():
+        return jsonify({"error": "Not found"}), 404
+    with open(path) as f:
+        return jsonify(json.load(f))
 
 
 if __name__ == "__main__":
