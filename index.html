@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GCP Token Bench</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://accounts.google.com/gsi/client" async></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -402,21 +402,7 @@
 <div id="auth-overlay">
   <h1>GCP Token Bench</h1>
   <p>Sign in with your Google account to get started. You'll provide your own Gemini API key to run prompts against Google's models.</p>
-  <div id="g_id_onload"
-       data-client_id="__GOOGLE_CLIENT_ID__"
-       data-context="signin"
-       data-ux_mode="popup"
-       data-callback="onGoogleSignIn"
-       data-auto_prompt="false">
-  </div>
-  <div class="g_id_signin"
-       data-type="standard"
-       data-shape="rectangular"
-       data-theme="filled_black"
-       data-text="signin_with"
-       data-size="large"
-       data-logo_alignment="left">
-  </div>
+  <div id="google-signin-container"></div>
   <p id="auth-note" style="font-size:12px; color: var(--danger); display:none;">
     Google Sign-In not configured. Set GOOGLE_CLIENT_ID env var in Vercel.<br>
     For local dev, you can bypass by clicking below.
@@ -606,24 +592,62 @@ function showApp() {
 }
 
 // ── Check auth on load ──
-window.addEventListener('load', () => {
-  // Check if Google Sign-In client ID is configured
-  const onloadDiv = document.getElementById('g_id_onload');
-  const clientId = onloadDiv.getAttribute('data-client_id');
-  if (clientId === '__GOOGLE_CLIENT_ID__' || !clientId) {
-    document.getElementById('auth-note').style.display = 'block';
-    document.getElementById('bypass-auth').style.display = 'inline-block';
-    // Hide Google button container
-    const gBtn = document.querySelector('.g_id_signin');
-    if (gBtn) gBtn.style.display = 'none';
-  }
-
-  // Check for saved session
+window.addEventListener('load', async () => {
+  // Check for saved session first
   const savedUser = localStorage.getItem('gcp-tb-user');
   if (savedUser) {
     currentUser = JSON.parse(savedUser);
     afterAuth();
+    return;
   }
+
+  // Fetch Google Client ID from server config
+  let clientId = '';
+  try {
+    const res = await fetch('/api/config');
+    const cfg = await res.json();
+    clientId = cfg.googleClientId;
+  } catch (e) {
+    // Config endpoint not available (local dev)
+  }
+
+  if (!clientId) {
+    document.getElementById('auth-note').style.display = 'block';
+    document.getElementById('bypass-auth').style.display = 'inline-block';
+    return;
+  }
+
+  // Wait for Google Identity Services library to load
+  function waitForGoogle() {
+    return new Promise((resolve) => {
+      if (window.google?.accounts?.id) { resolve(); return; }
+      const interval = setInterval(() => {
+        if (window.google?.accounts?.id) { clearInterval(interval); resolve(); }
+      }, 100);
+    });
+  }
+
+  await waitForGoogle();
+
+  google.accounts.id.initialize({
+    client_id: clientId,
+    callback: onGoogleSignIn,
+    context: 'signin',
+    ux_mode: 'popup',
+    auto_select: false,
+  });
+
+  google.accounts.id.renderButton(
+    document.getElementById('google-signin-container'),
+    {
+      type: 'standard',
+      shape: 'rectangular',
+      theme: 'filled_black',
+      text: 'signin_with',
+      size: 'large',
+      logo_alignment: 'left',
+    }
+  );
 });
 
 // ── Chat logic ──
