@@ -1,5 +1,9 @@
 {
   "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
     "google-auth-library": "^9.0.0"
   }

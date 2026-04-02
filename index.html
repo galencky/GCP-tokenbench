@@ -809,54 +809,81 @@ async function send() {
       }),
     });
 
+    // Check content type to determine response format
+    const contentType = resp.headers.get('content-type') || '';
+
     if (!resp.ok) {
-      const err = await resp.json();
-      contentEl.textContent = `Error: ${err.error || resp.statusText}`;
+      let errMsg = resp.statusText;
+      try {
+        const errText = await resp.text();
+        const errJson = JSON.parse(errText);
+        errMsg = errJson.error || errMsg;
+      } catch {}
+      contentEl.textContent = `Error: ${errMsg}`;
       messages.pop();
       sendBtn.disabled = false;
       return;
     }
 
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
     let fullText = '';
-    let buffer = '';
     let usageMeta = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    if (contentType.includes('text/event-stream')) {
+      // SSE streaming response
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = line.slice(6).trim();
-        if (!data || data === '[DONE]') continue;
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
 
-        try {
-          const chunk = JSON.parse(data);
-          // Extract text
-          const parts = chunk.candidates?.[0]?.content?.parts;
-          if (parts) {
-            for (const part of parts) {
-              if (part.text) {
-                fullText += part.text;
-                contentEl.textContent = fullText;
-                chatEl.scrollTop = chatEl.scrollHeight;
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (!data || data === '[DONE]') continue;
+
+          try {
+            const chunk = JSON.parse(data);
+            const parts = chunk.candidates?.[0]?.content?.parts;
+            if (parts) {
+              for (const part of parts) {
+                if (part.text) {
+                  fullText += part.text;
+                  contentEl.textContent = fullText;
+                  chatEl.scrollTop = chatEl.scrollHeight;
+                }
               }
             }
-          }
-          // Extract usage metadata
-          if (chunk.usageMetadata) {
-            usageMeta = chunk.usageMetadata;
-          }
-        } catch (e) {
-          // skip unparseable chunks
+            if (chunk.usageMetadata) usageMeta = chunk.usageMetadata;
+          } catch (e) {}
         }
       }
+    } else {
+      // JSON response (fallback)
+      const data = await resp.json();
+      const chunks = Array.isArray(data) ? data : [data];
+      for (const chunk of chunks) {
+        const parts = chunk.candidates?.[0]?.content?.parts;
+        if (parts) {
+          for (const part of parts) {
+            if (part.text) fullText += part.text;
+          }
+        }
+        if (chunk.usageMetadata) usageMeta = chunk.usageMetadata;
+      }
+      contentEl.textContent = fullText;
+    }
+
+    if (!fullText) {
+      contentEl.textContent = 'Error: Empty response from API';
+      messages.pop();
+      sendBtn.disabled = false;
+      return;
     }
 
     // Add assistant message to history

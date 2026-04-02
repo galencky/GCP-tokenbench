@@ -1,5 +1,9 @@
 import { GoogleAuth } from 'google-auth-library';
 
+export const config = {
+  maxDuration: 60,
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -21,7 +25,6 @@ export default async function handler(req, res) {
   const modelId = MODEL_IDS[model] || MODEL_IDS['gemini-2.5-flash'];
 
   try {
-    // Parse the service account key
     let keyData;
     try {
       keyData = typeof serviceAccountKey === 'string'
@@ -31,7 +34,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid service account JSON key' });
     }
 
-    // Create auth client from service account key
+    // Get access token from service account
     const auth = new GoogleAuth({
       credentials: keyData,
       scopes: ['https://www.googleapis.com/auth/cloud-platform'],
@@ -40,8 +43,8 @@ export default async function handler(req, res) {
     const client = await auth.getClient();
     const accessToken = (await client.getAccessToken()).token;
 
-    // Call Vertex AI streaming endpoint
-    const url = `https://${loc}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${loc}/publishers/google/models/${modelId}:streamGenerateContent`;
+    // Call Vertex AI (non-streaming to avoid Vercel stream issues, then forward as SSE)
+    const url = `https://${loc}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${loc}/publishers/google/models/${modelId}:generateContent`;
 
     const body = {
       contents: messages,
@@ -60,60 +63,34 @@ export default async function handler(req, res) {
       body: JSON.stringify(body),
     });
 
+    const responseText = await apiRes.text();
+
     if (!apiRes.ok) {
-      const err = await apiRes.text();
       let errMsg;
-      try { errMsg = JSON.parse(err).error?.message || err; } catch { errMsg = err; }
+      try { errMsg = JSON.parse(responseText).error?.message || responseText; } catch { errMsg = responseText; }
       return res.status(apiRes.status).json({ error: errMsg });
     }
 
-    // Stream the response back as SSE
+    // Parse the full response and send as SSE chunks
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    const reader = apiRes.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    const data = JSON.parse(responseText);
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Vertex AI streams JSON array chunks: [{...},\n{...},\n...]
-      // Parse complete JSON objects from the buffer
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // keep incomplete line in buffer
-
-      for (const line of lines) {
-        const trimmed = line.trim().replace(/^\[?\,?/, '').replace(/\]$/, '').trim();
-        if (!trimmed) continue;
-
-        try {
-          const chunk = JSON.parse(trimmed);
-          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-        } catch {
-          // not a complete JSON object yet, put it back
-        }
-      }
-    }
-
-    // Process remaining buffer
-    if (buffer.trim()) {
-      const trimmed = buffer.trim().replace(/^\[?\,?/, '').replace(/\]$/, '').trim();
-      if (trimmed) {
-        try {
-          const chunk = JSON.parse(trimmed);
-          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-        } catch { /* ignore */ }
-      }
+    // Vertex AI returns either a single object or an array
+    const chunks = Array.isArray(data) ? data : [data];
+    for (const chunk of chunks) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
 
     res.write('data: [DONE]\n\n');
     res.end();
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    console.error('Chat API error:', e);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: e.message });
+    }
+    res.end();
   }
 }
