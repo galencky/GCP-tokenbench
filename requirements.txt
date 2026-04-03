@@ -2,3 +2,6 @@ flask>=3.0
 google-auth>=2.0
 google-cloud-aiplatform>=1.60
 requests>=2.31
+pymongo[srv]>=4.6
+PyJWT>=2.8
+cryptography>=42.0

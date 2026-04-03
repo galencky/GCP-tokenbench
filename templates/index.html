@@ -221,7 +221,7 @@ body{font-family:'Google Sans',system-ui,-apple-system,sans-serif;background:var
     <h1><span>Gemini</span> Token Bench</h1>
     <p>Run prompts against Gemini models using your GCP $300 free credit.</p>
     <div id="g-btn" style="display:inline-block;margin-bottom:16px"></div><br>
-    <button class="btn" id="dev-bypass" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);margin-top:8px">Continue without sign-in</button>
+    {% if dev_login %}<button class="btn" id="dev-bypass" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);margin-top:8px">Continue without sign-in</button>{% endif %}
   </div>
 </div>
 
@@ -456,25 +456,59 @@ const MODELS = {{ models | tojson }};
 let user=null, projectId='', region='us-central1', saKeyRaw=null;
 let messages=[], totIn=0, totOut=0;
 let currentChatId=null, chatList=[];
+let authToken=null; // JWT session token
+
+// ── API helper (attaches JWT to every request) ──
+function authHeaders(){return {'Content-Type':'application/json','Authorization':'Bearer '+(authToken||'')}}
+async function api(path,body={}){
+  const r=await fetch(path,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
+  if(r.status===401){clearAuth();return null}
+  return r;
+}
+function clearAuth(){authToken=null;user=null;localStorage.removeItem('tb-token');localStorage.removeItem('tb-user');location.reload()}
 
 // ── Auth ──
+const GCID='{{ google_client_id }}';
 let _gsiRetry=0;
 function onGsiLoad(){
-  const cid='{{config.get("GOOGLE_CLIENT_ID","")}}';
-  if(!cid){document.getElementById('g-btn').style.display='none';return}
+  if(!GCID){document.getElementById('g-btn').style.display='none';return}
   if(!window.google?.accounts?.id){if(++_gsiRetry<15)setTimeout(onGsiLoad,200);return}
-  try{google.accounts.id.initialize({client_id:cid,callback:onGL});google.accounts.id.renderButton(document.getElementById('g-btn'),{type:'standard',theme:'filled_black',size:'large',text:'signin_with'})}catch(e){document.getElementById('g-btn').style.display='none'}
+  try{google.accounts.id.initialize({client_id:GCID,callback:onGL});google.accounts.id.renderButton(document.getElementById('g-btn'),{type:'standard',theme:'filled_black',size:'large',text:'signin_with'})}catch(e){document.getElementById('g-btn').style.display='none'}
 }
 window.addEventListener('load',onGsiLoad);
-function onGL(r){const p=parseJwt(r.credential);user={name:p.name,email:p.email,picture:p.picture};localStorage.setItem('tb-user',JSON.stringify(user));afterLogin()}
+
+async function onGL(r){
+  // Send Google ID token to backend for server-side verification
+  const resp=await fetch('/api/auth/google',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:r.credential})});
+  if(!resp.ok){const e=await resp.json();alert(e.error||'Login failed');return}
+  const d=await resp.json();
+  authToken=d.token;user=d.user;
+  localStorage.setItem('tb-token',authToken);localStorage.setItem('tb-user',JSON.stringify(user));
+  if(d.hasKey){projectId=d.projectId;showApp()}else{showKeyScreen()}
+}
+
 function parseJwt(t){const b=t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');return JSON.parse(decodeURIComponent(atob(b).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join('')))}
-document.getElementById('dev-bypass').onclick=()=>{user={name:'Local Dev',email:'dev@localhost',picture:''};localStorage.setItem('tb-user',JSON.stringify(user));afterLogin()};
+
+// Dev bypass (only shown when DEV_LOGIN=true on server)
+const devBtn=document.getElementById('dev-bypass');
+if(devBtn)devBtn.onclick=async()=>{
+  const resp=await fetch('/api/auth/dev',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'dev@localhost',name:'Local Dev'})});
+  if(!resp.ok){const e=await resp.json();alert(e.error||'Dev login failed');return}
+  const d=await resp.json();
+  authToken=d.token;user=d.user;
+  localStorage.setItem('tb-token',authToken);localStorage.setItem('tb-user',JSON.stringify(user));
+  if(d.hasKey){projectId=d.projectId;showApp()}else{showKeyScreen()}
+};
 
 async function afterLogin(){
+  // Verify existing token with backend
   document.getElementById('login').classList.add('hidden');
-  const r=await fetch('/api/check-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email})});
+  const r=await fetch('/api/auth/verify',{method:'POST',headers:authHeaders()});
+  if(!r||!r.ok){clearAuth();return}
   const d=await r.json();
-  if(d.has_key){projectId=d.project_id;showApp()}else{showKeyScreen()}
+  if(!d.valid){clearAuth();return}
+  user=d.user;
+  if(d.hasKey){projectId=d.projectId;showApp()}else{showKeyScreen()}
 }
 
 function showKeyScreen(){document.getElementById('key-scr').classList.remove('hidden')}
@@ -484,9 +518,9 @@ fd.addEventListener('dragover',e=>{e.preventDefault();fd.classList.add('on')});
 fd.addEventListener('dragleave',()=>fd.classList.remove('on'));
 fd.addEventListener('drop',e=>{e.preventDefault();fd.classList.remove('on');handleFile(e.dataTransfer.files[0])});
 function handleFile(f){if(!f)return;const r=new FileReader();r.onload=ev=>{try{const k=JSON.parse(ev.target.result);saKeyRaw=ev.target.result;document.getElementById('sa-st').style.color='var(--accent)';document.getElementById('sa-st').textContent='Loaded: '+(k.client_email||f.name);document.getElementById('save-btn').disabled=false;fd.textContent=f.name;fd.classList.add('on')}catch{document.getElementById('sa-st').style.color='var(--danger)';document.getElementById('sa-st').textContent='Invalid JSON'}};r.readAsText(f)}
-async function saveKey(){if(!saKeyRaw)return;const b=document.getElementById('save-btn');b.disabled=true;b.textContent='Validating...';region=document.getElementById('setup-reg').value;const r=await fetch('/api/save-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email,serviceAccountKey:saKeyRaw})});const d=await r.json();if(d.error){document.getElementById('sa-st').style.color='var(--danger)';document.getElementById('sa-st').textContent=d.error;b.disabled=false;b.textContent='Connect';return}projectId=d.project_id;saKeyRaw=null;document.getElementById('key-scr').classList.add('hidden');showApp()}
+async function saveKey(){if(!saKeyRaw)return;const b=document.getElementById('save-btn');b.disabled=true;b.textContent='Validating...';region=document.getElementById('setup-reg').value;const r=await fetch('/api/save-key',{method:'POST',headers:authHeaders(),body:JSON.stringify({serviceAccountKey:saKeyRaw})});const d=await r.json();if(d.error){document.getElementById('sa-st').style.color='var(--danger)';document.getElementById('sa-st').textContent=d.error;b.disabled=false;b.textContent='Connect';return}projectId=d.project_id;saKeyRaw=null;document.getElementById('key-scr').classList.add('hidden');showApp()}
 function reuploadKey(){hideApp();saKeyRaw=null;document.getElementById('sa-st').textContent='';document.getElementById('sa-f').value='';fd.textContent='Click or drag JSON key file here';fd.classList.remove('on');document.getElementById('save-btn').disabled=true;document.getElementById('save-btn').textContent='Connect';showKeyScreen()}
-function logout(){localStorage.removeItem('tb-user');location.reload()}
+function logout(){clearAuth()}
 
 // ── App ──
 function showApp(){
@@ -597,8 +631,8 @@ function updateMI_info(){
 
 // ── Chat History ──
 async function loadChatList(){
-  const r=await fetch('/api/chats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email})});
-  chatList=await r.json();renderChatList();
+  const r=await api('/api/chats');
+  if(!r)return;chatList=await r.json();renderChatList();
 }
 function renderChatList(){
   const el=document.getElementById('chat-list');
@@ -608,8 +642,8 @@ function renderChatList(){
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 
 async function loadChat(id){
-  const r=await fetch('/api/chats/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email,id})});
-  const d=await r.json();if(d.error)return;
+  const r=await api('/api/chats/load',{id});
+  if(!r)return;const d=await r.json();if(d.error)return;
   currentChatId=d.id;messages=d.messages||[];totIn=d.totIn||0;totOut=d.totOut||0;
   // Restore settings
   if(d.settings){
@@ -663,12 +697,12 @@ async function saveCurrentChat(){
   if(!messages.length)return;
   const topic=currentChatId?chatList.find(c=>c.id===currentChatId)?.topic:null;
   const finalTopic=topic||generateTopic(messages[0]?.parts?.[0]?.text||'Untitled');
-  const r=await fetch('/api/chats/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    email:user.email,id:currentChatId,topic:finalTopic,model:document.getElementById('model-sel').value,
+  const r=await api('/api/chats/save',{
+    id:currentChatId,topic:finalTopic,model:document.getElementById('model-sel').value,
     messages,settings:getSettings(),systemPrompt:document.getElementById('sys-prompt').value,
     totIn,totOut
-  })});
-  const d=await r.json();
+  });
+  if(!r)return;const d=await r.json();
   if(d.ok){currentChatId=d.id;loadChatList()}
 }
 
@@ -680,7 +714,7 @@ function generateTopic(text){
 
 async function deleteChat(id){
   if(!confirm('Delete this chat?'))return;
-  await fetch('/api/chats/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email,id})});
+  await api('/api/chats/delete',{id});
   if(currentChatId===id)newChat();
   loadChatList();
 }
@@ -889,7 +923,7 @@ function renderMediaInBody(container, mediaList){
 async function loadSavedMedia(container, refs){
   for(const ref of refs){
     try{
-      const r=await fetch('/api/chats/load-media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email,mediaId:ref.mediaId})});
+      const r=await fetch('/api/chats/load-media',{method:'POST',headers:authHeaders(),body:JSON.stringify({mediaId:ref.mediaId})});
       const d=await r.json();
       if(d.data){
         renderMediaInBody(container,[{type:ref.type,mimeType:d.mimeType||ref.mimeType,data:d.data}]);
@@ -919,8 +953,8 @@ async function send(){
   const {div:tDiv,mc:tMc,thk}=showThinking(modelId);
 
   try{
-    const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      email:user.email,model:modelId,location:document.getElementById('reg-sel').value,
+    const resp=await fetch('/api/chat',{method:'POST',headers:authHeaders(),body:JSON.stringify({
+      model:modelId,location:document.getElementById('reg-sel').value,
       messages,generationConfig:getGenConfig(),
       googleSearch:document.getElementById('gs-tog').checked,
       codeExecution:document.getElementById('code-tog').checked,
@@ -1058,7 +1092,7 @@ async function send(){
       const mediaRefs=[];
       for(const m of mediaItems){
         try{
-          const r=await fetch('/api/chats/save-media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:user.email,data:m.data,mimeType:m.mimeType})});
+          const r=await fetch('/api/chats/save-media',{method:'POST',headers:authHeaders(),body:JSON.stringify({data:m.data,mimeType:m.mimeType})});
           const d=await r.json();
           if(d.mediaId)mediaRefs.push({type:m.type,mimeType:m.mimeType,mediaId:d.mediaId});
         }catch{}
@@ -1076,8 +1110,13 @@ async function send(){
 
 // ── Init ──
 window.addEventListener('load',()=>{
-  const saved=localStorage.getItem('tb-user');
-  if(saved){user=JSON.parse(saved);afterLogin()}
+  const savedToken=localStorage.getItem('tb-token');
+  const savedUser=localStorage.getItem('tb-user');
+  if(savedToken&&savedUser){
+    authToken=savedToken;
+    user=JSON.parse(savedUser);
+    afterLogin();
+  }
   updateMI();
 });
 </script>

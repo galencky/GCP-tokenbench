@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 .env
+.env.*
+!.env.example
 venv/
 .claude/
 api_key.json
@@ -8,3 +10,5 @@ api_key.json
 *-credentials.json
 local_data/
 tokenbench.ipynb
+.vercel/
+node_modules/
