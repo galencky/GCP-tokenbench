@@ -221,7 +221,16 @@ body{font-family:'Google Sans',system-ui,-apple-system,sans-serif;background:var
     <h1><span>Gemini</span> Token Bench</h1>
     <p>Run prompts against Gemini models using your GCP $300 free credit.</p>
     <div id="g-btn" style="display:inline-block;margin-bottom:16px"></div><br>
-    {% if dev_login %}<button class="btn" id="dev-bypass" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);margin-top:8px">Continue without sign-in</button>{% endif %}
+    <button class="btn" id="key-login-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);margin-top:8px">Sign in with Service Account Key</button>
+    <div id="key-login-panel" class="hidden" style="margin-top:16px;text-align:left">
+      <p style="font-size:13px;color:var(--dim);margin:8px 0">Your service account becomes your account.<br><a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank">Create one</a> with <b>Vertex AI User</b> role.</p>
+      <input type="file" id="login-sa-f" accept=".json" style="display:none">
+      <div class="fd" id="login-fd" onclick="document.getElementById('login-sa-f').click()">Click or drag JSON key file here</div>
+      <div id="login-sa-st"></div>
+      <label>Region (2.5 models)</label>
+      <select id="login-setup-reg"><option value="us-central1">us-central1</option><option value="us-east4">us-east4</option><option value="us-west1">us-west1</option><option value="europe-west1">europe-west1</option><option value="asia-southeast1">asia-southeast1</option></select>
+      <button class="btn btn-p" id="login-save-btn" onclick="loginWithKey()" disabled style="width:100%;margin-top:8px">Sign In</button>
+    </div>
   </div>
 </div>
 
@@ -489,16 +498,56 @@ async function onGL(r){
 
 function parseJwt(t){const b=t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');return JSON.parse(decodeURIComponent(atob(b).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join('')))}
 
-// Dev bypass (only shown when DEV_LOGIN=true on server)
-const devBtn=document.getElementById('dev-bypass');
-if(devBtn)devBtn.onclick=async()=>{
-  const resp=await fetch('/api/auth/dev',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'dev@localhost',name:'Local Dev'})});
-  if(!resp.ok){const e=await resp.json();alert(e.error||'Dev login failed');return}
-  const d=await resp.json();
-  authToken=d.token;user=d.user;
-  localStorage.setItem('tb-token',authToken);localStorage.setItem('tb-user',JSON.stringify(user));
-  if(d.hasKey){projectId=d.projectId;showApp()}else{showKeyScreen()}
+// Service Account Key login (key acts as the account identity)
+let loginKeyRaw=null;
+document.getElementById('key-login-btn').onclick=()=>{
+  const p=document.getElementById('key-login-panel');
+  p.classList.toggle('hidden');
 };
+const lSaF=document.getElementById('login-sa-f'),lFd=document.getElementById('login-fd');
+lSaF.addEventListener('change',e=>handleLoginFile(e.target.files[0]));
+lFd.addEventListener('dragover',e=>{e.preventDefault();lFd.classList.add('on')});
+lFd.addEventListener('dragleave',()=>lFd.classList.remove('on'));
+lFd.addEventListener('drop',e=>{e.preventDefault();lFd.classList.remove('on');handleLoginFile(e.dataTransfer.files[0])});
+function handleLoginFile(f){
+  if(!f)return;
+  const r=new FileReader();
+  r.onload=ev=>{
+    try{
+      const k=JSON.parse(ev.target.result);
+      loginKeyRaw=ev.target.result;
+      const st=document.getElementById('login-sa-st');
+      st.style.color='var(--accent)';
+      st.textContent='Loaded: '+(k.client_email||f.name);
+      document.getElementById('login-save-btn').disabled=false;
+      lFd.textContent=f.name;lFd.classList.add('on');
+    }catch{
+      const st=document.getElementById('login-sa-st');
+      st.style.color='var(--danger)';
+      st.textContent='Invalid JSON';
+    }
+  };
+  r.readAsText(f);
+}
+async function loginWithKey(){
+  if(!loginKeyRaw)return;
+  const b=document.getElementById('login-save-btn');
+  b.disabled=true;b.textContent='Validating...';
+  region=document.getElementById('login-setup-reg').value;
+  const resp=await fetch('/api/auth/key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({serviceAccountKey:loginKeyRaw})});
+  const d=await resp.json();
+  if(!resp.ok||d.error){
+    const st=document.getElementById('login-sa-st');
+    st.style.color='var(--danger)';
+    st.textContent=d.error||'Login failed';
+    b.disabled=false;b.textContent='Sign In';
+    return;
+  }
+  authToken=d.token;user=d.user;projectId=d.projectId;
+  localStorage.setItem('tb-token',authToken);localStorage.setItem('tb-user',JSON.stringify(user));
+  loginKeyRaw=null;
+  showApp();
+}
 
 async function afterLogin(){
   // Verify existing token with backend

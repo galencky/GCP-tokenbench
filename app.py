@@ -610,6 +610,53 @@ def auth_dev():
     return jsonify({"token": token, "user": {"name": name, "email": email, "picture": ""}, "hasKey": has_key, "projectId": config.get("project_id", ""), "clientEmail": config.get("client_email", "")})
 
 
+@app.route("/api/auth/key", methods=["POST"])
+def auth_key():
+    """Authenticate by uploading a service account key. The key's client_email
+    becomes the user identity. Used when Google Sign-In is unavailable."""
+    data = request.json or {}
+    sa_key_raw = data.get("serviceAccountKey", "")
+    if not sa_key_raw:
+        return jsonify({"error": "Missing key"}), 400
+    try:
+        sa_key = json.loads(sa_key_raw) if isinstance(sa_key_raw, str) else sa_key_raw
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON key"}), 400
+    if not isinstance(sa_key, dict):
+        return jsonify({"error": "Invalid key format"}), 400
+    client_email = sa_key.get("client_email", "").strip()
+    project_id = sa_key.get("project_id", "").strip()
+    if not client_email:
+        return jsonify({"error": "Service account key missing client_email"}), 400
+    try:
+        get_access_token(sa_key)
+    except Exception as e:
+        return jsonify({"error": f"Key validation failed: {e}"}), 400
+    # Save the encrypted key tied to the SA's client_email as the user identity
+    save_user_sa_key(client_email, sa_key)
+    if db:
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (email, name, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, updated_at=NOW()
+                """, (client_email, project_id))
+            conn.commit()
+        finally:
+            conn.close()
+    display_name = project_id or client_email.split("@")[0]
+    token = create_token(client_email, display_name, "")
+    return jsonify({
+        "token": token,
+        "user": {"name": display_name, "email": client_email, "picture": ""},
+        "hasKey": True,
+        "projectId": project_id,
+        "clientEmail": client_email,
+    })
+
+
 @app.route("/api/auth/verify", methods=["POST"])
 @require_auth
 def auth_verify():

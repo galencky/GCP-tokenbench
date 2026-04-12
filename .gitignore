@@ -12,3 +12,5 @@ local_data/
 tokenbench.ipynb
 .vercel/
 node_modules/
+.vercel
+.env*.local
