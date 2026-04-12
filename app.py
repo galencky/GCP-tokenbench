@@ -22,25 +22,88 @@ from cryptography.fernet import Fernet
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
-MONGODB_URI = os.environ.get("MONGODB_URI", "")
+POSTGRES_URL = os.environ.get("POSTGRES_URL", os.environ.get("DATABASE_URL", ""))
 JWT_SECRET = os.environ.get("JWT_SECRET", os.environ.get("FLASK_SECRET", "dev-secret-change-in-prod"))
 ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:5000").split(",") if o.strip()]
 DEV_LOGIN = os.environ.get("DEV_LOGIN", "true").lower() == "true"
 
-# ── MongoDB ─────────────────────────────────────────────────────────────────
+# ── Postgres (Neon) ────────────────────────────────────────────────────────
 
 db = None
-if MONGODB_URI:
-    from pymongo import MongoClient
-    _client = MongoClient(MONGODB_URI, maxPoolSize=10, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
-    db = _client.get_default_database() if "/" in MONGODB_URI.split("?")[0].split("//")[-1] else _client["tokenbench"]
-    db.users.create_index("email", unique=True)
-    db.chats.create_index([("user_email", 1), ("chat_id", 1)], unique=True)
-    db.chats.create_index([("user_email", 1), ("updated_at", -1)])
-    db.media.create_index([("user_email", 1), ("media_id", 1)], unique=True)
-    db.rate_limits.create_index("expires_at", expireAfterSeconds=0)
+if POSTGRES_URL:
+    import psycopg2
+    import psycopg2.extras
+
+    def _get_conn():
+        return psycopg2.connect(POSTGRES_URL, sslmode="require")
+
+    def _init_db():
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        email TEXT PRIMARY KEY,
+                        name TEXT DEFAULT '',
+                        picture TEXT DEFAULT '',
+                        sa_key_encrypted TEXT,
+                        config JSONB DEFAULT '{}',
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS chats (
+                        user_email TEXT NOT NULL,
+                        chat_id TEXT NOT NULL,
+                        topic TEXT DEFAULT 'Untitled',
+                        model TEXT DEFAULT '',
+                        messages JSONB DEFAULT '[]',
+                        settings JSONB DEFAULT '{}',
+                        system_prompt TEXT DEFAULT '',
+                        tot_in INTEGER DEFAULT 0,
+                        tot_out INTEGER DEFAULT 0,
+                        message_count INTEGER DEFAULT 0,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+                        PRIMARY KEY (user_email, chat_id)
+                    )
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_chats_updated
+                    ON chats (user_email, updated_at DESC)
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS media (
+                        user_email TEXT NOT NULL,
+                        media_id TEXT NOT NULL,
+                        data TEXT NOT NULL,
+                        mime_type TEXT NOT NULL,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        PRIMARY KEY (user_email, media_id)
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS rate_limits (
+                        id SERIAL PRIMARY KEY,
+                        email TEXT NOT NULL,
+                        endpoint TEXT NOT NULL,
+                        timestamp TIMESTAMPTZ NOT NULL,
+                        expires_at TIMESTAMPTZ NOT NULL
+                    )
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_rate_limits_lookup
+                    ON rate_limits (email, endpoint, timestamp)
+                """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    _init_db()
+    db = True
 
 # ── Encryption ──────────────────────────────────────────────────────────────
 
@@ -139,11 +202,20 @@ def check_rate_limit(email, endpoint, limit=60, window=60):
         return True
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=window)
-    count = db.rate_limits.count_documents({"email": email, "endpoint": endpoint, "timestamp": {"$gte": cutoff}})
-    if count >= limit:
-        return False
-    db.rate_limits.insert_one({"email": email, "endpoint": endpoint, "timestamp": now, "expires_at": now + timedelta(seconds=window)})
-    return True
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM rate_limits WHERE expires_at < %s", (now,))
+            cur.execute("SELECT COUNT(*) FROM rate_limits WHERE email=%s AND endpoint=%s AND timestamp >= %s", (email, endpoint, cutoff))
+            count = cur.fetchone()[0]
+            if count >= limit:
+                conn.commit()
+                return False
+            cur.execute("INSERT INTO rate_limits (email, endpoint, timestamp, expires_at) VALUES (%s,%s,%s,%s)", (email, endpoint, now, now + timedelta(seconds=window)))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -162,7 +234,7 @@ def get_access_token(sa_key_data):
 
 
 # ── Storage Abstraction ─────────────────────────────────────────────────────
-# Uses MongoDB when configured, falls back to local files for dev.
+# Uses Postgres (Neon) when configured, falls back to local files for dev.
 
 from pathlib import Path
 DATA_DIR = Path(os.environ.get("DATA_DIR", "local_data"))
@@ -185,7 +257,17 @@ def save_user_sa_key(email, key_data):
     encrypted = encrypt_sa_key(key_data)
     config = {"project_id": key_data.get("project_id", ""), "client_email": key_data.get("client_email", ""), "updated_at": time.time()}
     if db:
-        db.users.update_one({"email": email}, {"$set": {"sa_key_encrypted": encrypted, "config": config, "updated_at": datetime.now(timezone.utc)}}, upsert=True)
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (email, sa_key_encrypted, config, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (email) DO UPDATE SET sa_key_encrypted=EXCLUDED.sa_key_encrypted, config=EXCLUDED.config, updated_at=NOW()
+                """, (email, encrypted, json.dumps(config)))
+            conn.commit()
+        finally:
+            conn.close()
     else:
         d = _user_dir(email)
         with open(d / "sa_key.enc", "w") as f:
@@ -196,10 +278,16 @@ def save_user_sa_key(email, key_data):
 
 def load_user_sa_key(email):
     if db:
-        user = db.users.find_one({"email": email}, {"sa_key_encrypted": 1, "config": 1})
-        if user and user.get("sa_key_encrypted"):
-            return decrypt_sa_key(user["sa_key_encrypted"]), user.get("config", {})
-        return None, None
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT sa_key_encrypted, config FROM users WHERE email=%s", (email,))
+                row = cur.fetchone()
+            if row and row[0]:
+                return decrypt_sa_key(row[0]), row[1] or {}
+            return None, None
+        finally:
+            conn.close()
     else:
         d = _user_dir(email)
         enc_path = d / "sa_key.enc"
@@ -223,10 +311,16 @@ def _load_config_file(d):
 
 def has_user_key(email):
     if db:
-        user = db.users.find_one({"email": email}, {"config": 1, "sa_key_encrypted": 1})
-        if user and user.get("sa_key_encrypted"):
-            return True, user.get("config", {})
-        return False, {}
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT sa_key_encrypted, config FROM users WHERE email=%s", (email,))
+                row = cur.fetchone()
+            if row and row[0]:
+                return True, row[1] or {}
+            return False, {}
+        finally:
+            conn.close()
     else:
         _, config = load_user_sa_key(email)
         return config is not None, config or {}
@@ -234,11 +328,14 @@ def has_user_key(email):
 
 def list_chats(email):
     if db:
-        cursor = db.chats.find({"user_email": email}, {"chat_id": 1, "topic": 1, "model": 1, "updated_at": 1, "messages": {"$slice": 0}}).sort("updated_at", -1)
-        result = []
-        for c in cursor:
-            result.append({"id": c["chat_id"], "topic": c.get("topic", "Untitled"), "model": c.get("model", ""), "updated": c.get("updated_at", datetime.now(timezone.utc)).timestamp(), "messageCount": c.get("message_count", 0)})
-        return result
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT chat_id, topic, model, updated_at, message_count FROM chats WHERE user_email=%s ORDER BY updated_at DESC", (email,))
+                rows = cur.fetchall()
+            return [{"id": r[0], "topic": r[1] or "Untitled", "model": r[2] or "", "updated": r[3].timestamp() if r[3] else 0, "messageCount": r[4] or 0} for r in rows]
+        finally:
+            conn.close()
     else:
         d = _chats_dir(email)
         chats = []
@@ -251,16 +348,26 @@ def list_chats(email):
 
 def save_chat(email, chat_id, data):
     if db:
-        doc = {
-            "user_email": email, "chat_id": chat_id,
-            "topic": data.get("topic", "Untitled"), "model": data.get("model", ""),
-            "messages": data.get("messages", []), "settings": data.get("settings", {}),
-            "system_prompt": data.get("systemPrompt", ""),
-            "tot_in": data.get("totIn", 0), "tot_out": data.get("totOut", 0),
-            "message_count": len(data.get("messages", [])),
-            "updated_at": datetime.now(timezone.utc),
-        }
-        db.chats.update_one({"user_email": email, "chat_id": chat_id}, {"$set": doc, "$setOnInsert": {"created_at": datetime.now(timezone.utc)}}, upsert=True)
+        now = datetime.now(timezone.utc)
+        messages = json.dumps(data.get("messages", []))
+        settings = json.dumps(data.get("settings", {}))
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO chats (user_email, chat_id, topic, model, messages, settings, system_prompt, tot_in, tot_out, message_count, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (user_email, chat_id) DO UPDATE SET
+                        topic=EXCLUDED.topic, model=EXCLUDED.model, messages=EXCLUDED.messages, settings=EXCLUDED.settings,
+                        system_prompt=EXCLUDED.system_prompt, tot_in=EXCLUDED.tot_in, tot_out=EXCLUDED.tot_out,
+                        message_count=EXCLUDED.message_count, updated_at=EXCLUDED.updated_at
+                """, (email, chat_id, data.get("topic", "Untitled"), data.get("model", ""),
+                      messages, settings, data.get("systemPrompt", ""),
+                      data.get("totIn", 0), data.get("totOut", 0),
+                      len(data.get("messages", [])), now))
+            conn.commit()
+        finally:
+            conn.close()
     else:
         d = _chats_dir(email)
         chat_data = {
@@ -275,15 +382,21 @@ def save_chat(email, chat_id, data):
 
 def load_chat(email, chat_id):
     if db:
-        c = db.chats.find_one({"user_email": email, "chat_id": chat_id})
-        if not c:
-            return None
-        return {
-            "id": c["chat_id"], "topic": c.get("topic", "Untitled"), "model": c.get("model", ""),
-            "messages": c.get("messages", []), "settings": c.get("settings", {}),
-            "systemPrompt": c.get("system_prompt", ""), "updated": c.get("updated_at", datetime.now(timezone.utc)).timestamp(),
-            "totIn": c.get("tot_in", 0), "totOut": c.get("tot_out", 0),
-        }
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT chat_id, topic, model, messages, settings, system_prompt, updated_at, tot_in, tot_out FROM chats WHERE user_email=%s AND chat_id=%s", (email, chat_id))
+                c = cur.fetchone()
+            if not c:
+                return None
+            return {
+                "id": c[0], "topic": c[1] or "Untitled", "model": c[2] or "",
+                "messages": c[3] or [], "settings": c[4] or {},
+                "systemPrompt": c[5] or "", "updated": c[6].timestamp() if c[6] else 0,
+                "totIn": c[7] or 0, "totOut": c[8] or 0,
+            }
+        finally:
+            conn.close()
     else:
         path = _chats_dir(email) / f"{chat_id}.json"
         if not path.exists():
@@ -294,7 +407,13 @@ def load_chat(email, chat_id):
 
 def delete_chat(email, chat_id):
     if db:
-        db.chats.delete_one({"user_email": email, "chat_id": chat_id})
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM chats WHERE user_email=%s AND chat_id=%s", (email, chat_id))
+            conn.commit()
+        finally:
+            conn.close()
     else:
         path = _chats_dir(email) / f"{chat_id}.json"
         if path.exists():
@@ -303,8 +422,15 @@ def delete_chat(email, chat_id):
 
 def rename_chat(email, chat_id, topic):
     if db:
-        result = db.chats.update_one({"user_email": email, "chat_id": chat_id}, {"$set": {"topic": topic}})
-        return result.matched_count > 0
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE chats SET topic=%s WHERE user_email=%s AND chat_id=%s", (topic, email, chat_id))
+                matched = cur.rowcount > 0
+            conn.commit()
+            return matched
+        finally:
+            conn.close()
     else:
         path = _chats_dir(email) / f"{chat_id}.json"
         if not path.exists():
@@ -319,11 +445,17 @@ def rename_chat(email, chat_id, topic):
 
 def save_media(email, media_id, data, mime_type):
     if db:
-        db.media.update_one(
-            {"user_email": email, "media_id": media_id},
-            {"$set": {"data": data, "mime_type": mime_type, "created_at": datetime.now(timezone.utc)}},
-            upsert=True,
-        )
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO media (user_email, media_id, data, mime_type)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_email, media_id) DO UPDATE SET data=EXCLUDED.data, mime_type=EXCLUDED.mime_type
+                """, (email, media_id, data, mime_type))
+            conn.commit()
+        finally:
+            conn.close()
     else:
         media_dir = _user_dir(email) / "media"
         media_dir.mkdir(exist_ok=True)
@@ -333,10 +465,16 @@ def save_media(email, media_id, data, mime_type):
 
 def load_media(email, media_id):
     if db:
-        m = db.media.find_one({"user_email": email, "media_id": media_id})
-        if not m:
-            return None
-        return {"data": m["data"], "mimeType": m["mime_type"]}
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT data, mime_type FROM media WHERE user_email=%s AND media_id=%s", (email, media_id))
+                row = cur.fetchone()
+            if not row:
+                return None
+            return {"data": row[0], "mimeType": row[1]}
+        finally:
+            conn.close()
     else:
         path = _user_dir(email) / "media" / f"{media_id}.json"
         if not path.exists():
@@ -429,7 +567,17 @@ def auth_google():
     name = idinfo.get("name", "")
     picture = idinfo.get("picture", "")
     if db:
-        db.users.update_one({"email": email}, {"$set": {"name": name, "picture": picture, "last_login": datetime.now(timezone.utc)}, "$setOnInsert": {"created_at": datetime.now(timezone.utc)}}, upsert=True)
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (email, name, picture, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, picture=EXCLUDED.picture, updated_at=NOW()
+                """, (email, name, picture))
+            conn.commit()
+        finally:
+            conn.close()
     token = create_token(email, name, picture)
     has_key, config = has_user_key(email)
     return jsonify({"token": token, "user": {"name": name, "email": email, "picture": picture}, "hasKey": has_key, "projectId": config.get("project_id", ""), "clientEmail": config.get("client_email", "")})
@@ -446,7 +594,17 @@ def auth_dev():
         return jsonify({"error": "Invalid email"}), 400
     name = data.get("name", "Local Dev")
     if db:
-        db.users.update_one({"email": email}, {"$set": {"name": name, "last_login": datetime.now(timezone.utc)}, "$setOnInsert": {"created_at": datetime.now(timezone.utc)}}, upsert=True)
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (email, name, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, updated_at=NOW()
+                """, (email, name))
+            conn.commit()
+        finally:
+            conn.close()
     token = create_token(email, name, "")
     has_key, config = has_user_key(email)
     return jsonify({"token": token, "user": {"name": name, "email": email, "picture": ""}, "hasKey": has_key, "projectId": config.get("project_id", ""), "clientEmail": config.get("client_email", "")})
@@ -761,14 +919,14 @@ def api_load_media():
 # ── Main ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    if not MONGODB_URI:
+    if not POSTGRES_URL:
         DATA_DIR.mkdir(exist_ok=True)
         (DATA_DIR / "users").mkdir(exist_ok=True)
-        print(f"\n  WARNING: No MONGODB_URI set. Using local file storage at {DATA_DIR.resolve()}")
+        print(f"\n  WARNING: No POSTGRES_URL set. Using local file storage at {DATA_DIR.resolve()}")
         if not ENCRYPTION_KEY:
             print("  WARNING: No ENCRYPTION_KEY set. SA keys stored with base64 encoding only.")
     else:
-        print(f"\n  Connected to MongoDB")
+        print(f"\n  Connected to Postgres (Neon)")
     if not GOOGLE_CLIENT_ID:
         print("  Google Sign-In disabled (no GOOGLE_CLIENT_ID)")
     if DEV_LOGIN:

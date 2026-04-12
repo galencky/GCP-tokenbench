@@ -10,14 +10,13 @@ Complete guide from zero to production. Follow each section in order.
 2. [Create a Google Cloud Project](#2-create-a-google-cloud-project)
 3. [Set Up Google OAuth (Sign-In)](#3-set-up-google-oauth-sign-in)
 4. [Create a GCP Service Account (for Vertex AI)](#4-create-a-gcp-service-account-for-vertex-ai)
-5. [Set Up MongoDB Atlas](#5-set-up-mongodb-atlas)
-6. [Generate App Secrets](#6-generate-app-secrets)
-7. [Install Vercel CLI & Deploy](#7-install-vercel-cli--deploy)
-8. [Set Environment Variables](#8-set-environment-variables)
-9. [Deploy to Production](#9-deploy-to-production)
-10. [Update Google OAuth with Final URL](#10-update-google-oauth-with-final-url)
-11. [Verify Everything Works](#11-verify-everything-works)
-12. [Troubleshooting](#12-troubleshooting)
+5. [Install Vercel CLI & Initial Deploy](#5-install-vercel-cli--initial-deploy)
+6. [Add Neon Postgres via Vercel Dashboard](#6-add-neon-postgres-via-vercel-dashboard)
+7. [Set Environment Variables](#7-set-environment-variables)
+8. [Deploy to Production](#8-deploy-to-production)
+9. [Update Google OAuth with Final URL](#9-update-google-oauth-with-final-url)
+10. [Verify Everything Works](#10-verify-everything-works)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
@@ -91,7 +90,7 @@ This lets users log into Token Bench with their Google account.
    ```
    http://localhost:5050
    ```
-   (You'll add the Vercel URL later in Step 10)
+   (You'll add the Vercel URL later in Step 9)
 5. Leave **Authorized redirect URIs** empty (not needed for Google Identity Services)
 6. Click **Create**
 7. A dialog appears with your **Client ID** and **Client Secret**
@@ -126,84 +125,15 @@ This is the JSON key file that users upload into Token Bench to access Gemini mo
 
 ---
 
-## 5. Set Up MongoDB Atlas
+## 5. Install Vercel CLI & Initial Deploy
 
-Vercel functions are stateless — there is no persistent filesystem. You **must** use MongoDB to store chats and user data.
-
-### 5a. Create a Free Cluster
-
-1. Go to [mongodb.com/atlas](https://www.mongodb.com/atlas) and sign up (or log in)
-2. Click **Build a Database** (or **Create** under Clusters)
-3. Select the **Free / M0** tier
-4. Choose a cloud provider and region (pick one close to your users)
-5. Name your cluster (e.g., `tokenbench-cluster`)
-6. Click **Create Deployment**
-
-### 5b. Create a Database User
-
-1. After cluster creation, you'll be prompted to create a database user
-2. Set:
-   - **Username**: `tokenbench`
-   - **Password**: click **Autogenerate Secure Password** and **copy the password**
-3. Click **Create Database User**
-
-> **Save the username and password** — you'll need them for the connection string.
-
-### 5c. Allow Network Access
-
-1. Go to **Security** → **Network Access** (left sidebar)
-2. Click **+ Add IP Address**
-3. Click **Allow Access from Anywhere** (sets it to `0.0.0.0/0`)
-   - This is required because Vercel's serverless functions use dynamic IP addresses
-4. Click **Confirm**
-
-### 5d. Get Your Connection String
-
-1. Go to **Database** (left sidebar) → click **Connect** on your cluster
-2. Choose **Drivers** (or **Connect your application**)
-3. Copy the connection string. It looks like:
-   ```
-   mongodb+srv://tokenbench:<password>@tokenbench-cluster.xxxxx.mongodb.net/?retryWrites=true&w=majority
-   ```
-4. Replace `<password>` with the actual password from step 5b
-5. Add the database name `tokenbench` before the `?`:
-   ```
-   mongodb+srv://tokenbench:YOUR_PASSWORD@tokenbench-cluster.xxxxx.mongodb.net/tokenbench?retryWrites=true&w=majority
-   ```
-
-> **Save this full connection string.** You'll set it as an environment variable.
-
----
-
-## 6. Generate App Secrets
-
-Open a terminal and run these commands. Save both outputs.
-
-### JWT Secret (random 64-character string)
-
-```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
-```
-
-### Encryption Key (Fernet key for encrypting service account keys at rest)
-
-```bash
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-> **Save both values.** You'll need them in Step 8.
-
----
-
-## 7. Install Vercel CLI & Deploy
-
-### 7a. Install Vercel CLI
+### 5a. Install Vercel CLI
 
 ```bash
 npm install -g vercel
 ```
 
-### 7b. Log In
+### 5b. Log In
 
 ```bash
 vercel login
@@ -211,7 +141,7 @@ vercel login
 
 Follow the prompts (email link or GitHub OAuth).
 
-### 7c. Initial Deploy
+### 5c. Initial Deploy
 
 From the project directory:
 
@@ -230,28 +160,54 @@ It will ask you:
 | Project name? | `gcp-tokenbench` (or your choice) |
 | In which directory is your code located? | `./` (press Enter) |
 
-This first deploy will likely fail or show errors — that's expected. We need to set environment variables first.
+This first deploy will fail — that's expected. We need to add the database and env vars first. But it creates the project on Vercel, which we need for the next step.
 
 ---
 
-## 8. Set Environment Variables
+## 6. Add Neon Postgres via Vercel Dashboard
 
-Run each command below. For each one, Vercel will ask which environments to apply it to — select **Production**, **Preview**, and **Development** (press `a` to select all).
+This is the easiest part — Vercel has Neon built in. No external accounts needed.
+
+1. Go to [vercel.com/dashboard](https://vercel.com/dashboard)
+2. Click on your **gcp-tokenbench** project
+3. Go to the **Storage** tab
+4. Click **Create Database**
+5. Select **Neon Serverless Postgres**
+6. Choose a region (pick one close to your users, e.g., `us-east-1`)
+7. Click **Create**
+
+Vercel automatically creates the database AND sets the `POSTGRES_URL` environment variable for you. You can verify this:
+
+8. Go to **Settings** → **Environment Variables**
+9. You should see `POSTGRES_URL` (and related `POSTGRES_*` vars) already populated
+
+> **That's it.** No connection strings to copy, no users to create, no network rules to configure. Vercel handles all of it.
+
+---
+
+## 7. Set Remaining Environment Variables
+
+Generate your secrets first. Open a terminal and run:
 
 ```bash
-vercel env add MONGODB_URI
+# JWT Secret (random 64-character string)
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# Encryption Key (Fernet key for encrypting service account keys at rest)
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
-> Paste your MongoDB connection string from Step 5d
+
+**Save both outputs.** Now set them on Vercel. For each command, select **Production**, **Preview**, and **Development** when prompted (press `a` to select all).
 
 ```bash
 vercel env add JWT_SECRET
 ```
-> Paste the 64-char hex string from Step 6
+> Paste the 64-char hex string
 
 ```bash
 vercel env add ENCRYPTION_KEY
 ```
-> Paste the Fernet key from Step 6
+> Paste the Fernet key
 
 ```bash
 vercel env add GOOGLE_CLIENT_ID
@@ -267,7 +223,7 @@ vercel env add DEV_LOGIN
 vercel env add ALLOWED_ORIGINS
 ```
 > Type your Vercel URL, e.g.: `https://gcp-tokenbench.vercel.app`
-> (Check what URL Vercel assigned from the initial deploy — run `vercel ls` to see it)
+> (Run `vercel ls` to see the URL Vercel assigned)
 
 ### Verify your env vars
 
@@ -275,11 +231,11 @@ vercel env add ALLOWED_ORIGINS
 vercel env ls
 ```
 
-You should see all 6 variables listed.
+You should see `POSTGRES_URL` (auto-set by Neon) plus the 5 you just added.
 
 ---
 
-## 9. Deploy to Production
+## 8. Deploy to Production
 
 ```bash
 vercel --prod
@@ -293,7 +249,7 @@ https://gcp-tokenbench.vercel.app
 
 ---
 
-## 10. Update Google OAuth with Final URL
+## 9. Update Google OAuth with Final URL
 
 Now that you have your production URL:
 
@@ -310,7 +266,7 @@ Now that you have your production URL:
 
 ---
 
-## 11. Verify Everything Works
+## 10. Verify Everything Works
 
 1. Open your Vercel URL in a browser
 2. You should see the login screen with a **Sign in with Google** button
@@ -332,7 +288,7 @@ Now that you have your production URL:
 
 ---
 
-## 12. Troubleshooting
+## 11. Troubleshooting
 
 ### "Google Sign-In not configured"
 - Check that `GOOGLE_CLIENT_ID` is set correctly in Vercel env vars
@@ -347,14 +303,14 @@ Now that you have your production URL:
 - The Google account signing in must be added as a test user in the OAuth consent screen, OR you need to publish the app (set status to "In production" in the consent screen settings)
 
 ### Chat history disappears after refresh
-- Verify `MONGODB_URI` is set and correct
+- Verify `POSTGRES_URL` is set (should be auto-set by Neon integration)
 - Check Vercel logs: `vercel logs --follow`
-- Make sure MongoDB Atlas network access allows `0.0.0.0/0`
+- Go to Vercel dashboard → Storage → check that Neon database is connected
 
 ### "502 Bad Gateway" or "Function timed out"
 - The `google-cloud-aiplatform` package is large. If the Lambda exceeds 50MB:
   - The `vercel.json` already sets `maxLambdaSize: 50mb`
-  - If it still fails, you may need to slim dependencies (the app only directly uses `google-auth`, `flask`, `requests`, `PyJWT`, `cryptography`, and `pymongo`)
+  - If it still fails, you may need to slim dependencies (the app only directly uses `google-auth`, `flask`, `requests`, `PyJWT`, `cryptography`, and `psycopg2-binary`)
 
 ### Cold start is slow (5-10 seconds on first request)
 - This is normal on Vercel's free tier for Python functions
