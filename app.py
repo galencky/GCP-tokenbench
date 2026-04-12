@@ -149,6 +149,8 @@ def check_rate_limit(email, endpoint, limit=60, window=60):
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def safe_id(raw_id):
+    if raw_id is None:
+        return None
     clean = re.sub(r'[^a-zA-Z0-9_-]', '', str(raw_id))
     return clean if clean else None
 
