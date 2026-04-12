@@ -1,7 +1,7 @@
 # GCP Token Bench — Project Documentation
 
 > **Purpose:** Complete technical reference for LLM-assisted development handover.
-> **Last updated:** 2026-04-02
+> **Last updated:** 2026-04-13
 > **Repository:** https://github.com/galencky/GCP-tokenbench.git
 
 ---
@@ -72,8 +72,9 @@ The app is a **Flask backend** serving a **single-page HTML/JS/CSS frontend** wi
 ┌──────────────────▼──────────────────────────────────────┐
 │  Flask Backend (app.py)                                 │
 │  - Routes: auth, chat, history, media                   │
+│  - JWT auth + encrypted SA key storage                  │
 │  - Streams Vertex AI response as SSE                    │
-│  - Per-user file-based storage (local_data/)            │
+│  - Neon Postgres (prod) / local files (dev)             │
 └──────────────────┬──────────────────────────────────────┘
                    │  HTTPS (Bearer token auth)
                    │  streamGenerateContent
@@ -99,24 +100,25 @@ The app is a **Flask backend** serving a **single-page HTML/JS/CSS frontend** wi
 
 ```
 GCP-tokenbench/
-├── app.py                          # Flask backend (≈500 lines)
-├── requirements.txt                # Python dependencies (4 packages)
+├── app.py                          # Flask backend (≈800 lines)
+├── requirements.txt                # Python dependencies (7 packages)
+├── vercel.json                     # Vercel deployment config
 ├── templates/
 │   └── index.html                  # Full SPA frontend (≈1085 lines)
-├── tokenbench.ipynb                # Jupyter notebook with Vertex AI examples
-├── local_data/                     # Runtime data (gitignored)
+├── DEPLOY.md                       # Step-by-step deployment guide
+├── document.md                     # Technical reference (this file)
+├── .env.example                    # Environment variable template
+├── local_data/                     # Dev-only runtime data (gitignored)
 │   └── users/
 │       └── {sha256_hash[:16]}/     # Per-user directory
-│           ├── sa_key.json         # Service account key (sensitive)
+│           ├── sa_key.enc          # Encrypted service account key
 │           ├── config.json         # {project_id, client_email, updated_at}
 │           ├── chats/
 │           │   └── {chat_id}.json  # Chat history + settings
 │           └── media/
 │               └── {media_id}.json # {data: base64, mimeType}
 ├── api_key.json                    # Dev SA key (gitignored)
-├── .gitignore
-└── .claude/
-    └── settings.local.json         # Claude Code permissions
+└── .gitignore
 ```
 
 ---
@@ -163,28 +165,42 @@ GCP-tokenbench/
 |-------|--------|---------|------|----------|
 | `/` | GET | Serve frontend | No | HTML (injects MODELS as JSON) |
 | `/api/models` | GET | List all models | No | JSON dict |
-| `/api/save-key` | POST | Upload & validate SA key | No | `{ok, project_id, client_email}` |
-| `/api/check-key` | POST | Check if user has stored key | No | `{has_key, project_id?, client_email?}` |
-| `/api/chat` | POST | Send message (streaming) | Yes | SSE stream |
-| `/api/chats` | POST | List user's saved chats | Yes | JSON array |
-| `/api/chats/save` | POST | Save/create chat | Yes | `{ok, id}` |
-| `/api/chats/load` | POST | Load specific chat | Yes | Full chat JSON |
-| `/api/chats/delete` | POST | Delete chat | Yes | `{ok}` |
-| `/api/chats/rename` | POST | Rename chat topic | Yes | `{ok}` |
+| `/api/auth/google` | POST | Google Sign-In → JWT | No | `{token, user, hasKey, projectId}` |
+| `/api/auth/dev` | POST | Dev-only login → JWT | No | `{token, user, hasKey, projectId}` |
+| `/api/auth/verify` | POST | Verify existing JWT | JWT | `{valid, user, hasKey, projectId}` |
+| `/api/save-key` | POST | Upload & validate SA key | JWT | `{ok, project_id, client_email}` |
+| `/api/chat` | POST | Send message (streaming) | JWT | SSE stream |
+| `/api/chats` | POST | List user's saved chats | JWT | JSON array |
+| `/api/chats/save` | POST | Save/create chat | JWT | `{ok, id}` |
+| `/api/chats/load` | POST | Load specific chat | JWT | Full chat JSON |
+| `/api/chats/delete` | POST | Delete chat | JWT | `{ok}` |
+| `/api/chats/rename` | POST | Rename chat topic | JWT | `{ok}` |
 | `/api/pcm-to-wav` | POST | Convert PCM audio → WAV | No | `{data: base64_wav, mimeType}` |
-| `/api/chats/save-media` | POST | Store media blob | Yes | `{ok, mediaId}` |
-| `/api/chats/load-media` | POST | Retrieve media by ID | Yes | `{data, mimeType}` |
+| `/api/chats/save-media` | POST | Store media blob | JWT | `{ok, mediaId}` |
+| `/api/chats/load-media` | POST | Retrieve media by ID | JWT | `{data, mimeType}` |
 
-**Auth model:** Email-based. All "Yes" routes require `email` in the POST body. The email is used to look up the user's directory (SHA256 hash). No session tokens or cookies.
+**Auth model:** JWT-based. Protected routes require `Authorization: Bearer <token>` header. Tokens are issued on login (Google or dev) with 24-hour expiry. The JWT payload contains `{email, name, picture}`. User data is keyed by email (SHA256 hash for local file paths, direct email for Postgres).
 
 ### 4.3 Authentication & Key Management
 
+**Login flow:**
+```
+User → Google Sign-In (or dev bypass)
+  → POST /api/auth/google (or /api/auth/dev)
+  → Server verifies Google ID token (or accepts dev email)
+  → Issues JWT (24h expiry) signed with JWT_SECRET
+  → Frontend stores JWT in localStorage as 'tb-token'
+  → All subsequent API calls include Authorization: Bearer <token>
+```
+
+**Service account key upload:**
 ```
 User uploads SA key JSON → POST /api/save-key
   → Server parses JSON
   → Validates by calling get_access_token() (attempts token refresh)
-  → If valid: saves to local_data/users/{hash}/sa_key.json
-  → Also saves config.json with {project_id, client_email, updated_at}
+  → Encrypts key with Fernet (ENCRYPTION_KEY) before storing
+  → If valid: saves encrypted key to Postgres (or local_data/users/{hash}/sa_key.enc)
+  → Also saves config with {project_id, client_email, updated_at}
 ```
 
 **`get_access_token(sa_key_data)`:**
@@ -342,22 +358,23 @@ let attachments = [];                      // Pending file attachments [{name, m
 ### 5.2 Auth Flow
 
 ```
-Page load → check localStorage('tb-user')
+Page load → check localStorage('tb-token' + 'tb-user')
   ├── Found → afterLogin()
   └── Not found → show login screen
-       ├── Google Sign-In → JWT → {name, email, picture} → afterLogin()
-       └── "Continue without sign-in" → {name:'Local Dev', email:'dev@localhost'} → afterLogin()
+       ├── Google Sign-In → POST /api/auth/google → JWT token → afterLogin()
+       └── "Dev Login" (if DEV_LOGIN=true) → POST /api/auth/dev → JWT token → afterLogin()
 
-afterLogin() → POST /api/check-key
-  ├── has_key: true → showApp() (main UI)
-  └── has_key: false → showKeyScreen() (SA key upload form)
+afterLogin() → POST /api/auth/verify (with Bearer token)
+  ├── valid + has_key → showApp() (main UI)
+  ├── valid + no key → showKeyScreen() (SA key upload form)
+  └── invalid/expired → clearAuth() → reload to login screen
 
 Key upload → handleFile() → saveKey()
-  → POST /api/save-key (validates on server)
+  → POST /api/save-key (validates + encrypts on server)
   → showApp()
 ```
 
-**Persistence:** `localStorage` stores user object as `tb-user` and theme as `tb-theme`.
+**Persistence:** `localStorage` stores JWT as `tb-token`, user object as `tb-user`, and theme as `tb-theme`.
 
 ### 5.3 Toggle System & Mutual Exclusivity
 
@@ -539,19 +556,32 @@ Four toggles in the top bar: **Search**, **Code Exec**, **Image Gen**, **TTS**.
 
 ---
 
-## 6. Data Storage & File Formats
+## 6. Data Storage
 
-### User Directory
+### Production: Neon Postgres (via Vercel)
+
+When `POSTGRES_URL` is set, all data is stored in Postgres. Tables are auto-created on startup:
+
+| Table | Primary Key | Purpose |
+|-------|------------|---------|
+| `users` | `email` | User profiles, encrypted SA keys, config |
+| `chats` | `(user_email, chat_id)` | Chat history, settings, token counts |
+| `media` | `(user_email, media_id)` | Base64-encoded media blobs |
+| `rate_limits` | `id` (serial) | Per-user rate limit tracking |
+
+### Development: Local Files
+
+When no `POSTGRES_URL` is set, falls back to file-based storage:
 
 ```
 local_data/users/{sha256(email)[:16]}/
 ```
 
-### Service Account Key (`sa_key.json`)
+### Service Account Key (`sa_key.enc`)
 
-Full Google Cloud service account JSON key as received from GCP Console. Contains `project_id`, `client_email`, `private_key`, etc.
+Encrypted with Fernet (`ENCRYPTION_KEY`). Falls back to base64 encoding if no encryption key is set.
 
-### Config (`config.json`)
+### Config (stored in `users` table or `config.json`)
 
 ```json
 {
@@ -612,9 +642,10 @@ Full Google Cloud service account JSON key as received from GCP Console. Contain
 
 ### POST `/api/chat` — Full Request
 
+**Header:** `Authorization: Bearer <JWT token>`
+
 ```json
 {
-  "email": "string (required)",
   "model": "string (must be in MODELS registry)",
   "location": "string (default: us-central1, used for regional models)",
   "messages": [
@@ -672,9 +703,12 @@ data: [DONE]
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `flask` | ≥3.0 | Web framework, template rendering, request handling |
-| `google-auth` | ≥2.0 | Service account credential management, OAuth2 token refresh |
-| `google-cloud-aiplatform` | ≥1.60 | Vertex AI SDK (imported but only `google.auth` used directly) |
+| `google-auth` | ≥2.0 | Service account credential management, OAuth2 token refresh, ID token verification |
+| `google-cloud-aiplatform` | ≥1.60 | Vertex AI SDK (transitive dep for `google.auth`) |
 | `requests` | ≥2.31 | HTTP client for Vertex AI API calls |
+| `psycopg2-binary` | ≥2.9 | PostgreSQL driver (Neon Postgres) |
+| `PyJWT` | ≥2.8 | JWT token encoding/decoding for session auth |
+| `cryptography` | ≥42.0 | Fernet encryption for service account keys at rest |
 
 **Frontend CDN deps:**
 - `https://accounts.google.com/gsi/client` — Google Identity Services (Sign-In)
@@ -693,28 +727,43 @@ data: [DONE]
 - GCP project with Vertex AI API enabled
 - Service account JSON key with **Vertex AI User** role
 
-### Setup
+### Local Development Setup
 
 ```bash
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-python app.py
+
+# Start with dev login enabled (no Google OAuth needed)
+JWT_SECRET="dev-secret" DEV_LOGIN=true python app.py
 ```
 
-**Optional environment variables:**
+**Environment variables:**
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATA_DIR` | `local_data` | Where user data is stored |
-| `FLASK_SECRET` | `dev-secret-change-in-prod` | Flask session secret |
+| `POSTGRES_URL` | (empty) | Neon Postgres connection string. If unset, uses local file storage |
+| `JWT_SECRET` | `dev-secret-change-in-prod` | Secret for signing JWT tokens |
+| `ENCRYPTION_KEY` | (empty) | Fernet key for encrypting SA keys at rest |
 | `GOOGLE_CLIENT_ID` | (empty) | OAuth client ID for Google Sign-In |
+| `ALLOWED_ORIGINS` | `http://localhost:5000` | Comma-separated CORS origins |
+| `DEV_LOGIN` | `true` | Enable dev login without Google (set `false` in production) |
+| `DATA_DIR` | `local_data` | Where local file storage is kept (dev only) |
 
 **Server starts at:** `http://127.0.0.1:5000`
+
+> **Note:** macOS uses port 5000 for AirPlay Receiver. If you get a 403, start on another port or disable AirPlay Receiver in System Settings → General → AirDrop & Handoff.
 
 ### First Use
 
 1. Open `http://localhost:5000`
-2. Click "Continue without sign-in" (or use Google Sign-In if `GOOGLE_CLIENT_ID` is set)
+2. Click **Dev Login** (or use Google Sign-In if `GOOGLE_CLIENT_ID` is set)
 3. Upload your GCP service account JSON key
 4. Select a model and start chatting
+
+### Production Deployment
+
+See [DEPLOY.md](DEPLOY.md) for the full Vercel + Neon Postgres deployment guide.
 
 ---
 
@@ -786,8 +835,13 @@ b6a360f  Remove .claude settings from repo and add to .gitignore
 
 ### Currently Protected
 
+- **JWT authentication** — all protected routes require valid Bearer token with 24-hour expiry
+- **SA key encryption** — keys encrypted with Fernet (AES-128-CBC) before storage when `ENCRYPTION_KEY` is set
 - **Path traversal** — `safe_id()` strips all non-alphanumeric characters from user-supplied IDs
 - **SA key validation** — keys are validated (token refresh attempted) before being stored
+- **Rate limiting** — `/api/chat` limited to 30 requests/min per user (Postgres only)
+- **CORS** — only allows requests from configured `ALLOWED_ORIGINS`
+- **CSP headers** — Content-Security-Policy restricts script/style/connect sources
 - **Sensitive files gitignored** — `api_key.json`, `*-key.json`, `*-credentials.json`, `local_data/`
 - **XSS in user info** — user name/picture escaped via `esc()` in sidebar rendering
 - **XSS in grounding links** — URI and title escaped, `rel="noopener"` added
@@ -795,10 +849,8 @@ b6a360f  Remove .claude settings from repo and add to .gitignore
 
 ### Considerations for Production
 
-- **SA keys stored unencrypted** — `sa_key.json` is plaintext on disk. Consider encryption at rest.
-- **No rate limiting** — any authenticated user can make unlimited API calls.
-- **No CSRF protection** — POST endpoints accept any origin. Add CSRF tokens for production.
-- **Email as auth** — no verification that the email belongs to the requester. The dev bypass creates `dev@localhost` with no credentials.
-- **No HTTPS** — development server runs HTTP. Deploy behind a reverse proxy with TLS.
-- **Flask dev server** — `app.run(debug=False)` is not production-grade. Use gunicorn/uwsgi.
-- **`FLASK_SECRET` default** — hardcoded `dev-secret-change-in-prod`. Must be changed for deployment.
+- **No CSRF protection** — POST endpoints rely on JWT Bearer tokens (not cookies), which mitigates most CSRF. Consider CSRF tokens for additional defense.
+- **Dev login must be disabled** — set `DEV_LOGIN=false` in production. Otherwise anyone can log in without Google auth.
+- **JWT secret must be changed** — the default `dev-secret-change-in-prod` must be replaced with a strong random string.
+- **No HTTPS** — development server runs HTTP. Vercel provides HTTPS automatically in production.
+- **Rate limiting scope** — only `/api/chat` is rate-limited. Key upload, media ops, and chat CRUD are unlimited.

@@ -338,8 +338,8 @@ Or connect your GitHub repo to Vercel for automatic deploys on push:
 |------|-----------------|
 | Vercel Dashboard | [vercel.com/dashboard](https://vercel.com/dashboard) |
 | Vercel Logs | `vercel logs` or dashboard → Deployments → Functions |
+| Neon Database | Vercel dashboard → your project → Storage |
 | Google Cloud Console | [console.cloud.google.com](https://console.cloud.google.com/) |
-| MongoDB Atlas | [cloud.mongodb.com](https://cloud.mongodb.com/) |
 | OAuth Consent Screen | GCP Console → APIs & Services → OAuth consent screen |
 | OAuth Credentials | GCP Console → APIs & Services → Credentials |
 
